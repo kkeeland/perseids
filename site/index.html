@@ -289,7 +289,7 @@ footer { border-top: 1px solid var(--g2); padding-block: 26px calc(26px + env(sa
       <p class="eyebrow">Open source · MIT · Claude Code and Codex plugins</p>
       <h1 data-scramble>Run every CI job <span class="blk">at once.</span></h1>
       <p class="sub">Perseids runs each job in your GitHub Actions workflow on its own fresh cloud machine, all at the same time, against your exact local commit. Your CI takes as long as its slowest job. No push, no runners, no YAML changes.</p>
-      <div class="install"><code id="inst">git clone https://github.com/kkeeland/perseids ~/.perseids</code><button type="button" data-copy="#inst">COPY</button></div>
+      <div class="install"><code id="inst">curl -fsSL https://raw.githubusercontent.com/kkeeland/perseids/main/install.sh | sh</code><button type="button" data-copy="#inst">COPY</button></div>
       <div class="heroctas"><a class="btn" href="#demo">See it run ↓</a><a class="btn" href="https://github.com/kkeeland/perseids">View on GitHub</a></div>
       <p class="note">Then <span style="color:#fff">perseids key</span> with your Boat key, and <span style="color:#fff">perseids run</span>. macOS and Linux.</p>
     </div>
@@ -396,8 +396,8 @@ Added plugin `perseids` from marketplace `perseids`.</pre></div></div>
     <p class="sub">The CLI is MIT licensed. It runs your jobs on <a href="https://boat.dev">Boat</a> machines in your own account, so you pay Boat directly.</p>
     <div class="byo">
       <div class="win stack rise"><div class="tb"><div class="ttl"><span>~/your-repo</span></div><div class="ctl"><button class="min" aria-label="Minimize"></button></div></div><div class="body">
-<pre class="term"><b>$ git clone https://github.com/kkeeland/perseids ~/.perseids</b>
-<b>$ ln -s ~/.perseids/bin/perseids /usr/local/bin/perseids</b>
+<pre class="term"><b>$ curl -fsSL https://raw.githubusercontent.com/kkeeland/perseids/main/install.sh | sh</b>
+perseids: installed in ~/.perseids, linked from ~/.local/bin/perseids
 
 <b>$ perseids key</b>
 Boat API key (boat.dev, Settings, API keys): ••••••••
@@ -439,8 +439,7 @@ perseids: key saved to ~/.config/perseids/boat.env; perseids run will use it
         <h3>perseids</h3>
         <p>Run every job in your GitHub Actions workflow at the same time, each on a fresh cloud machine, against your exact local commit. One exit code when it's done.</p>
         <h4>Install</h4>
-<pre><code>git clone https://github.com/kkeeland/perseids ~/.perseids
-ln -s ~/.perseids/bin/perseids /usr/local/bin/perseids</code></pre>
+<pre><code>curl -fsSL https://raw.githubusercontent.com/kkeeland/perseids/main/install.sh | sh</code></pre>
         <p>Needs <code>bash</code>, <code>git</code>, <code>jq</code>, <code>curl</code>, <code>ssh</code> and Ruby 2.6+. MIT licensed.</p>
         <h4>Add your Boat key</h4>
 <pre><code>perseids key        # asks once, checks it with Boat, saves it with mode 600</code></pre>
@@ -527,8 +526,7 @@ acme-web@3f2a91c0 · 4 jobs on 4 machines
         <h3>Quickstart</h3>
         <p>Run your existing GitHub Actions workflow on Perseids in about two minutes. You need a repo with a workflow in <code>.github/workflows</code>.</p>
         <h4>1 · Install</h4>
-<pre><code>git clone https://github.com/kkeeland/perseids ~/.perseids
-ln -s ~/.perseids/bin/perseids /usr/local/bin/perseids</code></pre>
+<pre><code>curl -fsSL https://raw.githubusercontent.com/kkeeland/perseids/main/install.sh | sh</code></pre>
         <h4>2 · Add your Boat key</h4>
         <p>Create one in Boat under Settings, API keys. Perseids checks it and keeps it in <code>~/.config/perseids/boat.env</code>.</p>
 <pre><code>perseids key</code></pre>
@@ -574,7 +572,7 @@ ln -s ~/.perseids/bin/perseids /usr/local/bin/perseids</code></pre>
   <section class="end" id="access">
     <p class="eyebrow">Early access</p>
     <h2 data-scramble>Stop waiting<br>on CI.</h2>
-    <div class="install"><code id="inst2">git clone https://github.com/kkeeland/perseids ~/.perseids</code><button type="button" data-copy="#inst2">COPY</button></div>
+    <div class="install"><code id="inst2">curl -fsSL https://raw.githubusercontent.com/kkeeland/perseids/main/install.sh | sh</code><button type="button" data-copy="#inst2">COPY</button></div>
     <p class="note">Then <span style="color:#fff">perseids key</span> and <span style="color:#fff">perseids run</span>. MIT licensed.</p>
     <div class="heroctas"><a class="btn inv" href="https://github.com/kkeeland/perseids">View on GitHub</a><a class="btn" href="#plugins">Get the plugins</a></div>
     <div class="bin" id="bin2" aria-hidden="true"></div>

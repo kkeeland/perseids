@@ -10,6 +10,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: ruby test/runner_test.rb
       - run: bash -n bin/perseids
+      - run: sh test/install_test.sh
 
   services:
     runs-on: ubuntu-latest

@@ -6,7 +6,8 @@ t=$(mktemp -d)
 trap 'rm -rf "$t"' EXIT
 fail() { echo "install_test: $*"; exit 1; }
 
-run() { HOME=$t/home PERSEIDS_REPO=$root PATH=$1 /bin/sh "$root/install.sh"; }
+git -c advice.detachedHead=false clone -q "$root" "$t/src" && git -C "$t/src" checkout -q -B main # CI checkouts are detached; users clone main
+run() { HOME=$t/home PERSEIDS_REPO=$t/src PATH=$1 /bin/sh "$root/install.sh"; }
 mkdir -p "$t/home"
 run "$PATH" > "$t/out" || fail "install failed: $(cat "$t/out")"
 [ -L "$t/home/.local/bin/perseids" ] || fail "no symlink in ~/.local/bin"

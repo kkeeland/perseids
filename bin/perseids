@@ -6,6 +6,7 @@
 #   perseids key                                                           # save your Boat API key (asked once, never shown)
 #   perseids run [job...] [-w workflow] [-C dir] [--keep-going] [--dirty]   # no job: every job, in needs: order
 #   perseids exec '<command>' [-C dir] [--dirty]                           # any command, on one box
+#   perseids exec --split N [--files '<glob>'] '<command>'                 # one command over N boxes: {i} {n} {files}
 #   perseids image build [-C dir]                                          # bake .perseids/setup.sh into an image
 #   perseids ls                                                            # this account's perseids boxes
 #   perseids reap [--all]                                                  # delete orphaned (or all) boxes from here
@@ -142,6 +143,8 @@ WF=
 KEEP=
 DIRTY=
 ALL=
+SPLIT=
+FILES=
 ARGS=()
 while [ $# -gt 0 ]; do
   case $1 in
@@ -150,6 +153,8 @@ while [ $# -gt 0 ]; do
     --keep-going) KEEP=1; shift ;;
     --dirty) DIRTY=1; shift ;;
     --all) ALL=all; shift ;;
+    --split) SPLIT=${2:?--split needs a number of boxes}; shift 2 ;;
+    --files) FILES=${2:?--files needs a glob}; shift 2 ;;
     -h | --help) usage ;;
     -*) say "unknown flag $1"; usage 64 ;;
     *) ARGS+=("$1"); shift ;;
@@ -264,7 +269,13 @@ git init -q ~/w && cd ~/w && git fetch -q ~/src.bundle refs/perseids/run-$$ && g
 export PERSEIDS_SHA=$SHA PERSEIDS_REF_NAME=$(q "$BRANCH") PERSEIDS_REPOSITORY=$(q "$ORIGIN") PERSEIDS_EVENT=$(q "${PERSEIDS_EVENT:-push}")${KEEP:+ PERSEIDS_KEEP_GOING=1}"
 
 # --- the work list: one line per box, "wave<TAB>job<TAB>index<TAB>state<TAB>needs<TAB>label<TAB>note" ("-" if empty) ---
-if [ "$CMD" = exec ]; then
+[ -z "$SPLIT$FILES" ] || [ "$CMD" = exec ] || die "--split and --files go with exec"
+if [ "$CMD" = exec ] && [ -n "$SPLIT$FILES" ]; then # one shard per box; the worker runs $WORK/shard-<i>.cmd
+  [ -n "${ARGS[0]:-}" ] || die "exec needs a command"
+  case $SPLIT in '' | *[!0-9]* | 0*) die "--split needs a number of boxes, 1 or more" ;; esac
+  command -v ruby >/dev/null || die "perseids needs ruby (2.6 or newer) to split"
+  ruby "$ROOT/lib/split.rb" "$SHA" "$SPLIT" "${FILES:--}" "${ARGS[0]}" "$WORK" >"$WORK/plan" || die "couldn't split the command"
+elif [ "$CMD" = exec ]; then
   [ -n "${ARGS[0]:-}" ] || die "exec needs a command"
   printf '0\texec\t0\trun\t-\texec\t-\n' >"$WORK/plan"
 else
@@ -301,7 +312,7 @@ worker() { # id job index label
   "${SCP[@]}" "$WORK/src.bundle" "$ROOT/lib/runner.rb" "$DEST:/home/user/"
   if [ "$CMD" = exec ]; then
     script="$PREP
-bash -lc $(q "${ARGS[0]}")"
+bash -lc $(q "$(cat "$WORK/shard-$3.cmd" 2>/dev/null || printf %s "${ARGS[0]}")")"
   else
     script="$PREP
 command -v ruby >/dev/null || { sudo -n apt-get update -qq && sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ruby; } >/dev/null
@@ -384,14 +395,14 @@ board
 # --- summary ---
 rc=0
 total=0
-echo "--- perseids: $REPO@$TAG (${SHA}) · $WF" >&2
+echo "--- perseids: $REPO@$TAG (${SHA}) · ${WF:-$CMD}" >&2
 while IFS=$'\t' read -r wave job idx st0 needs label note; do
   id="$job-$idx"
   st=$(cat "$WORK/$id/state")
   start=$(cat "$WORK/$id/start" 2>/dev/null || echo 0)
   end=$(cat "$WORK/$id/end" 2>/dev/null || echo "$start")
   total=$((total + end - start))
-  printf '  %-12s %-44s %s\n' "${st%% *}" "${label:0:44}" "$(printf %s "$st" | cut -s -d' ' -f2-)" >&2
+  printf '  %-12s %-44s %3dm%02ds %s\n' "${st%% *}" "${label:0:44}" $(((end - start) / 60)) $(((end - start) % 60)) "$(printf %s "$st" | cut -s -d' ' -f2-)" >&2
   case ${st%% *} in
     fail) rc=1 ;;
     error) [ "$rc" = 1 ] || rc=99 ;;

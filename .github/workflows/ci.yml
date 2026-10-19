@@ -1,0 +1,44 @@
+name: ci
+# Perseids' own CI, and its end-to-end test: `perseids run` puts each job and matrix entry below on its own box.
+# GitHub only runs it when asked, so it spends no Actions minutes.
+on: workflow_dispatch
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ruby test/runner_test.rb
+      - run: bash -n bin/perseids
+
+  services:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        pg: [15, 16]
+    services:
+      postgres:
+        image: postgres:${{ matrix.pg }}
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node -v | grep -q '^v22\.'
+      - name: postgres ${{ matrix.pg }} answers on localhost
+        run: timeout 5 bash -c '</dev/tcp/127.0.0.1/5432'
+
+  after:
+    needs: [unit, services]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "needs ran this after unit and services passed"

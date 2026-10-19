@@ -1,0 +1,14 @@
+{
+  "name": "perseids",
+  "description": "Perseids: parallel CI for your GitHub Actions workflow, from your terminal or your agent.",
+  "owner": {
+    "name": "kkeeland"
+  },
+  "plugins": [
+    {
+      "name": "perseids",
+      "source": "./",
+      "description": "Run your GitHub Actions CI on fresh cloud machines, every job at once, against your exact local commit."
+    }
+  ]
+}

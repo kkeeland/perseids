@@ -1,0 +1,405 @@
+#!/bin/bash
+# perseids: run a repo's GitHub Actions jobs on fresh Boat boxes (boat.dev), one box per job and per matrix entry,
+# all at once. Each box gets the exact commit (a git bundle, with history), runs the job's steps with lib/runner.rb,
+# sends its log back, and is deleted on every way out. No GitHub Actions minutes and no push.
+#
+#   perseids key                                                           # save your Boat API key (asked once, never shown)
+#   perseids run [job...] [-w workflow] [-C dir] [--keep-going] [--dirty]   # no job: every job, in needs: order
+#   perseids exec '<command>' [-C dir] [--dirty]                           # any command, on one box
+#   perseids image build [-C dir]                                          # bake .perseids/setup.sh into an image
+#   perseids ls                                                            # this account's perseids boxes
+#   perseids reap [--all]                                                  # delete orphaned (or all) boxes from here
+#   perseids login | usage                                                 # hosted mode: sign in with GitHub | this month's use
+#
+# Exit: 0 passed, 1 failed, 2 incomplete (something it can't run on a box was skipped), 99 a box itself failed.
+# Settings (environment):
+#   BOAT_API_KEY, or PERSEIDS_KEY_FILE (default ~/.config/perseids/boat.env, written by `perseids key`).
+#     The key goes to curl on stdin and is never printed or sent to a box.
+#   PERSEIDS_TYPE   box size: small | default | large | xlarge (default large: 8 vCPU / 16 GB)
+#   PERSEIDS_MAX    boxes at once across this account's perseids runs (default 10)
+#   PERSEIDS_TTL    seconds before a box stops itself, the safety net (default 7200)
+#   PERSEIDS_TAIL   log lines to print for each failed job (default 40)
+#   PERSEIDS_EVENT  the github.event_name jobs see (default push; workflow_dispatch runs manual-only steps)
+#   PERSEIDS_CLOUD  1: hosted mode, no Boat account needed (on by itself after `perseids login`; 0 turns it off).
+#     PERSEIDS_CLOUD_URL is the server, PERSEIDS_TOKEN or ~/.config/perseids/cloud.env the sign-in.
+set -euo pipefail
+src=$0
+while [ -L "$src" ]; do d=$(cd "$(dirname "$src")" && pwd); src=$(readlink "$src"); case $src in /*) ;; *) src=$d/$src ;; esac; done
+ROOT=$(cd "$(dirname "$src")/.." && pwd)
+CLOUD_FILE=${PERSEIDS_CLOUD_FILE:-$HOME/.config/perseids/cloud.env}
+CLOUD=${PERSEIDS_CLOUD:-$([ -f "$CLOUD_FILE" ] && echo 1 || true)}
+[ "$CLOUD" = 0 ] && CLOUD=
+CLOUD_URL=${PERSEIDS_CLOUD_URL:-$(sed -n 's/^PERSEIDS_CLOUD_URL=//p' "$CLOUD_FILE" 2>/dev/null | head -1 || true)}
+CLOUD_URL=${CLOUD_URL:-http://127.0.0.1:8787} # ponytail: no public server yet; set this once one is deployed
+API=${BOAT_API:-https://boat.dev/api/v1}
+[ -n "$CLOUD" ] && API=$CLOUD_URL/api/v1
+TYPE=${PERSEIDS_TYPE:-large}
+MAX=${PERSEIDS_MAX:-10}
+TTL=${PERSEIDS_TTL:-7200}
+HOST=$(hostname -s)
+WORK=$(mktemp -d)
+say() { echo "perseids: $*" >&2; }
+die() { say "$*"; exit 99; }
+usage() { sed -n '2,/^set -euo/p' "$src" | sed '$d' | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+
+key() {
+  [ -n "${KEY:-}" ] && return
+  if [ -n "$CLOUD" ]; then # hosted mode: our sign-in token, never a Boat key
+    KEY=${PERSEIDS_TOKEN:-$(sed -n 's/^PERSEIDS_TOKEN=//p' "$CLOUD_FILE" 2>/dev/null | head -1 || true)}
+    [ -n "$KEY" ] || die "not signed in: run perseids login (or set PERSEIDS_TOKEN)"
+    return
+  fi
+  KEY=${BOAT_API_KEY:-$(sed -n 's/^BOAT_API_KEY=//p' "${PERSEIDS_KEY_FILE:-$HOME/.config/perseids/boat.env}" 2>/dev/null | tr -d "\"' " | head -1 || true)}
+  [ -n "$KEY" ] || die "no Boat key: run perseids key (or set BOAT_API_KEY)"
+}
+api() { # method path [body] [extra header]
+  local a=(-sS --retry 3 --retry-all-errors --max-time 120 -K - -X "$1" "$API$2" -H 'Content-Type: application/json')
+  [ -n "${3:-}" ] && a+=(--data-binary "$3")
+  [ -n "${4:-}" ] && a+=(-H "$4")
+  printf 'header = "Authorization: Bearer %s"\n' "$KEY" | curl "${a[@]}"
+}
+boxes() { # id state name, for this account's perseids boxes that still run
+  api GET '/sandboxes?limit=100' | jq -r '.sandboxes[]? | select((.name // "") | startswith("perseids:")) | select(.state != "archived") | "\(.id) \(.state) \(.name)"'
+}
+destroy() { api DELETE "/sandboxes/$1" "" "X-Ascii-Confirm-Delete: $1" >/dev/null 2>&1 || say "box $1 wasn't deleted; delete it in Boat"; }
+reap() { # delete boxes started from this machine whose perseids process is gone (a killed agent, a crash)
+  local id st name pid
+  boxes | while read -r id st name; do
+    case $name in *"#$HOST:"*) ;; *) continue ;; esac
+    pid=${name##*:}
+    if [ "${1:-}" = all ] || ! kill -0 "$pid" 2>/dev/null; then say "deleting box $id ($name)"; destroy "$id"; fi
+  done
+}
+state() { api GET "/sandboxes/$1" | jq -r '.sandbox.state // ("err:" + (.code // "?"))'; }
+wait_state() { # id state...
+  local id=$1 s w; shift
+  for _ in $(seq 120); do
+    s=$(state "$id")
+    for w in "$@"; do [ "$s" = "$w" ] && return 0; done
+    case $s in error | err:*) die "box $id is $s" ;; esac
+    sleep 5
+  done
+  die "box $id stayed $s"
+}
+create() { # json boxfile name -> sets BOX and writes its id to boxfile (cleanup deletes what's there). Boat limits starts per minute, so a refused start waits and retries.
+  local r
+  for i in $(seq 12); do
+    r=$(api POST /sandboxes "$1" "Idempotency-Key: perseids-$$-$RANDOM")
+    BOX=$(jq -r '.sandbox.id // empty' <<<"$r" 2>/dev/null)
+    [ -n "$BOX" ] && break
+    [ "$(jq -r .retry <<<"$r" 2>/dev/null)" = false ] && die "$(jq -r '.message // .code' <<<"$r")"
+    [ "$i" = 12 ] && die "Boat refused the box: $(jq -r '.message // .error // .code // .' <<<"$r" 2>/dev/null | head -c 300)"
+    sleep 10
+  done
+  echo "$BOX" >"$2"
+  api PATCH "/sandboxes/$BOX" "$(jq -nc --arg n "$3" '{name:$n}')" >/dev/null || true
+  wait_state "$BOX" ready idle running
+}
+ssh_to() { # dir -> sets SSH, SCP, DEST for $BOX
+  local r host port d=$1
+  ssh-keygen -q -t ed25519 -N '' -f "$d/key"
+  for _ in $(seq 20); do
+    r=$(api POST "/sandboxes/$BOX/sshkey" "$(jq -nc --rawfile k "$d/key.pub" '{key:($k|rtrimstr("\n"))}')")
+    [ "$(jq -r .ok <<<"$r" 2>/dev/null)" = true ] && break
+    sleep 3
+  done
+  [ "$(jq -r .ok <<<"$r" 2>/dev/null)" = true ] || die "SSH on $BOX wasn't allowed"
+  echo "$BOX $(jq -r .hostKey <<<"$r")" >"$d/known_hosts"
+  host=$(jq -r '.sshEndpoint // empty' <<<"$r")
+  port=22
+  if [ -n "$host" ]; then port=${host##*:}; host=${host%:*}; else host=$(jq -r .machineIp <<<"$r"); fi
+  local o=(-i "$d/key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$d/known_hosts"
+    -o HostKeyAlias="$BOX" -o ConnectTimeout=20 -o LogLevel=ERROR -o ServerAliveInterval=30 -o ServerAliveCountMax=10)
+  SSH=(ssh "${o[@]}" -p "$port")
+  SCP=(scp -q "${o[@]}" -P "$port")
+  DEST="user@$host"
+  for _ in $(seq 20); do "${SSH[@]}" "$DEST" true 2>/dev/null && return 0; sleep 3; done
+  die "SSH to $BOX didn't answer"
+}
+price() { case $TYPE in small) echo 0.018 ;; default) echo 0.036 ;; xlarge) echo 0.20 ;; *) echo 0.072 ;; esac; }
+image_file() { echo "$DIR/.perseids/image"; }
+box_json() {
+  local img
+  img=$(cat "$(image_file)" 2>/dev/null || true)
+  jq -nc --arg f "$img" --arg t "$TYPE" --argjson ttl "$TTL" '{type:$t,noEnv:true,ttlSeconds:$ttl} + (if $f == "" then {} else {from:$f} end)'
+}
+
+cleanup() {
+  local p f
+  for p in ${PIDS:-}; do pkill -TERM -P "$p" 2>/dev/null || true; kill "$p" 2>/dev/null || true; done
+  for f in "$WORK"/*/box "$WORK"/*.box; do [ -s "$f" ] && destroy "$(cat "$f")"; done 2>/dev/null
+  [ -n "${BOX:-}" ] && destroy "$BOX"
+  rm -rf "$WORK"
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM HUP
+
+# --- arguments ---
+CMD=${1:-help}
+[ $# -gt 0 ] && shift
+DIR=.
+WF=
+KEEP=
+DIRTY=
+ALL=
+ARGS=()
+while [ $# -gt 0 ]; do
+  case $1 in
+    -C) DIR=${2:?-C needs a folder}; shift 2 ;;
+    -w | --workflow) WF=${2:?-w needs a workflow}; shift 2 ;;
+    --keep-going) KEEP=1; shift ;;
+    --dirty) DIRTY=1; shift ;;
+    --all) ALL=all; shift ;;
+    -h | --help) usage ;;
+    -*) say "unknown flag $1"; usage 64 ;;
+    *) ARGS+=("$1"); shift ;;
+  esac
+done
+DIR=$(cd "$DIR" && pwd)
+
+case $CMD in
+  help | -h | --help) usage ;;
+  login) # GitHub device flow through the hosted server; it keeps only your GitHub id and login
+    command -v jq >/dev/null || die "perseids needs jq"
+    r=$(curl -sS -X POST "$CLOUD_URL/auth/device")
+    [ -n "$(jq -r '.device_code // empty' <<<"$r")" ] || die "sign-in didn't start: $(jq -r '.message // .error // .' <<<"$r")"
+    say "open $(jq -r .verification_uri <<<"$r") and enter $(jq -r .user_code <<<"$r")"
+    dc=$(jq -r .device_code <<<"$r")
+    wait=$(jq -r '.interval // 5' <<<"$r")
+    while sleep "$wait"; do
+      r=$(curl -sS -X POST "$CLOUD_URL/auth/token" -H 'Content-Type: application/json' --data-binary "$(jq -nc --arg d "$dc" '{device_code:$d}')")
+      case $(jq -r '.error // empty' <<<"$r") in
+        authorization_pending) ;;
+        slow_down) wait=$((wait + 5)) ;;
+        "") break ;;
+        *) die "sign-in failed: $(jq -r .error <<<"$r")" ;;
+      esac
+    done
+    mkdir -p "$(dirname "$CLOUD_FILE")"
+    (umask 077 && printf 'PERSEIDS_CLOUD_URL=%s\nPERSEIDS_TOKEN=%s\n' "$CLOUD_URL" "$(jq -r .token <<<"$r")" >"$CLOUD_FILE")
+    say "signed in as $(jq -r .login <<<"$r"); hosted mode is on (PERSEIDS_CLOUD=0 turns it off)"
+    exit 0 ;;
+  usage) CLOUD=1; API=$CLOUD_URL/api/v1; key; api GET /me | jq .; exit 0 ;;
+  key) # the one place your Boat key lives: ~/.config/perseids/boat.env, mode 600
+    f=${PERSEIDS_KEY_FILE:-$HOME/.config/perseids/boat.env}
+    if [ -t 0 ]; then printf 'Boat API key (boat.dev, Settings, API keys): ' >&2; read -rs k; echo >&2; else read -r k; fi
+    case $k in boat_*) ;; *) die "that isn't a Boat key: they start with boat_" ;; esac
+    KEY=$k; API=${BOAT_API:-https://boat.dev/api/v1} # checked against Boat itself, even when signed in to the hosted service
+    [ "$(api GET '/sandboxes?limit=1' | jq -r 'has("sandboxes")' 2>/dev/null)" = true ] || die "Boat didn't accept that key"
+    mkdir -p "$(dirname "$f")"
+    (umask 077 && printf 'BOAT_API_KEY=%s\n' "$k" >"$f")
+    say "key saved to $f; perseids run will use it"
+    exit 0 ;;
+  ls) key; boxes; exit 0 ;;
+  reap) key; reap "$ALL"; exit 0 ;;
+  run | exec | image) key; command -v jq >/dev/null || die "perseids needs jq" ;;
+  *) say "unknown command $CMD"; usage 64 ;;
+esac
+if [ -n "$CLOUD" ]; then
+  [ "$CMD" = image ] && die "image build isn't in hosted mode yet"
+  # never ask for more boxes at once than this account may hold
+  cap=$(api GET /me | jq -r '.boxCap // empty')
+  [ -n "$cap" ] || die "the hosted server at $CLOUD_URL didn't answer or the sign-in is stale (perseids login)"
+  if [ "$MAX" -gt "$cap" ]; then MAX=$cap; fi
+fi
+
+# --- image build: a box runs images/base.sh and the repo's .perseids/setup.sh, then is saved as a named snapshot ---
+if [ "$CMD" = image ]; then
+  [ "${ARGS[0]:-}" = build ] || usage 64
+  REPO=$(basename "$(git -C "$DIR" rev-parse --show-toplevel 2>/dev/null || echo "$DIR")")
+  NAME=perseids-$(printf %s "$REPO" | tr -c 'A-Za-z0-9-' '-' | cut -c1-30)-$(date -u +%Y%m%d-%H%M)
+  say "1/3 a fresh $TYPE box runs the setup"
+  create "$(jq -nc --arg t "$TYPE" --argjson ttl "$TTL" '{type:$t,noEnv:true,ttlSeconds:$ttl}')" "$WORK/image.box" "perseids:image:$NAME#$HOST:$$"
+  mkdir -p "$WORK/img"
+  ssh_to "$WORK/img"
+  "${SCP[@]}" "$ROOT/images/base.sh" "$DEST:/home/user/perseids-base.sh"
+  STEPS='sudo -n bash /home/user/perseids-base.sh'
+  if [ -f "$DIR/.perseids/setup.sh" ]; then
+    "${SCP[@]}" "$DIR/.perseids/setup.sh" "$DEST:/home/user/perseids-setup.sh"
+    STEPS="$STEPS && sudo -n bash /home/user/perseids-setup.sh"
+  fi
+  "${SSH[@]}" "$DEST" "$STEPS && rm -f /home/user/perseids-*.sh" || die "the setup failed"
+  say "2/3 saving the image $NAME"
+  api POST "/sandboxes/$BOX/stop" >/dev/null
+  wait_state "$BOX" archived
+  api POST /named-snapshots "$(jq -nc --arg b "$BOX" --arg n "$NAME" '{sandboxId:$b,name:$n}')" >/dev/null
+  s=saving
+  for _ in $(seq 90); do
+    s=$(api GET /named-snapshots | jq -r --arg n "$NAME" '.snapshots[]? | select(.name==$n) | .status')
+    [ "$s" = saving ] || break
+    sleep 10
+  done
+  [ "$s" = ready ] || die "the image $NAME is $s"
+  OLD=$(cat "$(image_file)" 2>/dev/null || true)
+  mkdir -p "$DIR/.perseids"
+  echo "$NAME" >"$(image_file)"
+  # The old image goes once nothing new starts from it (running boxes already have their disks).
+  if [ -n "$OLD" ] && [ "$OLD" != "$NAME" ]; then api DELETE "/named-snapshots/$OLD" >/dev/null || say "the old image $OLD wasn't deleted"; fi
+  say "3/3 image $NAME saved in .perseids/image (commit it); the build box is deleted"
+  exit 0
+fi
+
+# --- the commit to test ---
+git -C "$DIR" rev-parse --git-dir >/dev/null 2>&1 || die "$DIR isn't a git repo"
+cd "$(git -C "$DIR" rev-parse --show-toplevel)"
+DIR=$(pwd)
+SHA=$(git rev-parse HEAD)
+TAG=${SHA:0:8}
+if ! git diff --quiet HEAD --; then
+  [ -n "$DIRTY" ] || die "uncommitted changes to tracked files: commit them (perseids tests a commit), or pass --dirty"
+  SHA=$(git stash create) # a commit of the working tree; it touches nothing here
+  TAG=${TAG}+dirty
+fi
+REPO=$(basename "$DIR")
+ORIGIN=$(git remote get-url origin 2>/dev/null | sed -E 's#^.*[:/]([^/]+/[^/]+)$#\1#; s#\.git$##' || true)
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
+LOGDIR="${XDG_STATE_HOME:-$HOME/.local/state}/perseids/logs/$REPO-$TAG-$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$LOGDIR"
+git update-ref "refs/perseids/run-$$" "$SHA"
+git bundle create -q "$WORK/src.bundle" "refs/perseids/run-$$" 2>/dev/null || { git update-ref -d "refs/perseids/run-$$"; die "git bundle failed"; }
+git update-ref -d "refs/perseids/run-$$"
+q() { printf %q "$1"; }
+PREP="set -eo pipefail
+git init -q ~/w && cd ~/w && git fetch -q ~/src.bundle refs/perseids/run-$$ && git checkout -q --detach $SHA
+export PERSEIDS_SHA=$SHA PERSEIDS_REF_NAME=$(q "$BRANCH") PERSEIDS_REPOSITORY=$(q "$ORIGIN") PERSEIDS_EVENT=$(q "${PERSEIDS_EVENT:-push}")${KEEP:+ PERSEIDS_KEEP_GOING=1}"
+
+# --- the work list: one line per box, "wave<TAB>job<TAB>index<TAB>state<TAB>needs<TAB>label<TAB>note" ("-" if empty) ---
+if [ "$CMD" = exec ]; then
+  [ -n "${ARGS[0]:-}" ] || die "exec needs a command"
+  printf '0\texec\t0\trun\t-\texec\t-\n' >"$WORK/plan"
+else
+  if [ -z "$WF" ]; then
+    for f in .github/workflows/ci.yml .github/workflows/ci.yaml; do [ -f "$f" ] && WF=$f && break; done
+    if [ -z "$WF" ]; then
+      n=$(ls .github/workflows/*.y*ml 2>/dev/null | wc -l | tr -d ' ')
+      [ "$n" = 1 ] || die "pick a workflow with -w (there are $n in .github/workflows)"
+      WF=$(ls .github/workflows/*.y*ml)
+    fi
+  fi
+  [ -f "$WF" ] || WF=.github/workflows/$WF
+  [ -f "$WF" ] || die "no workflow $WF"
+  command -v ruby >/dev/null || die "perseids needs ruby (2.6 or newer) to read the workflow"
+  ruby "$ROOT/lib/runner.rb" plan "$WF" ${ARGS[@]+"${ARGS[@]}"} >"$WORK/plan" || die "couldn't plan $WF"
+fi
+
+# Each box's folder holds: state ("queued|booting|running|pass|fail|incomplete|error|skip|unsupported note..."),
+# start and end times, and the box id while it lives.
+setstate() { printf '%s\n' "$2" >"$WORK/$1/state.tmp" && mv "$WORK/$1/state.tmp" "$WORK/$1/state"; }
+slug() { printf %s "$1" | tr -c 'A-Za-z0-9._-' '-' | cut -c1-40; }
+worker() { # id job index label
+  local id=$1 D="$WORK/$1" log="$LOGDIR/$1.log" rc r script
+  BOX=
+  trap '[ -n "$BOX" ] && destroy "$BOX"; rm -f "$D/box"; grep -qE "^(pass|fail|incomplete)" "$D/state" || setstate "$id" "error $(tail -1 "$D/err" 2>/dev/null)"' EXIT
+  # Wait for a slot under PERSEIDS_MAX across every perseids run on this account.
+  # ponytail: check-then-create, so runs that start together can overshoot by a few; fine for a cost cap.
+  while [ "$(boxes | wc -l | tr -d ' ')" -ge "$MAX" ]; do sleep 15; done
+  setstate "$id" booting
+  date +%s >"$D/start"
+  create "$(box_json)" "$D/box" "perseids:$REPO@$TAG:$(slug "$4")#$HOST:$$"
+  ssh_to "$D"
+  setstate "$id" running
+  "${SCP[@]}" "$WORK/src.bundle" "$ROOT/lib/runner.rb" "$DEST:/home/user/"
+  if [ "$CMD" = exec ]; then
+    script="$PREP
+bash -lc $(q "${ARGS[0]}")"
+  else
+    script="$PREP
+command -v ruby >/dev/null || { sudo -n apt-get update -qq && sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ruby; } >/dev/null
+ruby ~/runner.rb run $(q "$WF") $(q "$2") $3"
+  fi
+  set +e
+  "${SSH[@]}" "$DEST" "bash -lc $(q "$script")" >"$log" 2>&1
+  rc=$?
+  set -e
+  date +%s >"$D/end"
+  destroy "$BOX"
+  BOX=
+  rm -f "$D/box"
+  r=$(grep -a '^PERSEIDS_RESULT ' "$log" | tail -1 | cut -d' ' -f2- || true)
+  if [ -z "$r" ]; then
+    case $rc in 0) r=pass ;; 255) r="error the SSH link dropped (rerun)" ;; *) [ "$CMD" = exec ] && r="fail exit $rc" || r="error the box run stopped (exit $rc)" ;; esac
+  else
+    r=$(printf %s "$r" | tr '\t' ' ')
+  fi
+  setstate "$id" "$r"
+}
+
+# --- the live board: redrawn in a terminal, one line per change otherwise (agents read that) ---
+TTY=
+[ -t 2 ] && TTY=1
+DRAWN=0
+board() {
+  local now id st start end secs cost lines=0 out=""
+  now=$(date +%s)
+  while IFS=$'\t' read -r wave job idx st0 needs label note; do
+    id="$job-$idx"
+    st=$(cat "$WORK/$id/state" 2>/dev/null || echo waiting)
+    start=$(cat "$WORK/$id/start" 2>/dev/null || echo "")
+    end=$(cat "$WORK/$id/end" 2>/dev/null || echo "$now")
+    secs=0
+    [ -n "$start" ] && secs=$((end - start))
+    cost=$(awk -v s="$secs" -v p="$(price)" 'BEGIN{printf "$%.3f", s/3600*p}')
+    if [ -n "$TTY" ]; then
+      out="$out$(printf '  %-12s %-44s %3dm%02ds %s' "${st%% *}" "${label:0:44}" $((secs / 60)) $((secs % 60)) "$cost")"$'\n'
+      lines=$((lines + 1))
+    elif [ "$(cat "$WORK/$id/seen" 2>/dev/null)" != "$st" ]; then
+      echo "$st" >"$WORK/$id/seen"
+      say "$label: $st"
+    fi
+  done <"$WORK/plan"
+  if [ -n "$TTY" ]; then
+    [ "$DRAWN" -gt 0 ] && printf '\033[%dA' "$DRAWN" >&2
+    printf '%s' "$out" | sed $'s/$/\033[K/' >&2
+    DRAWN=$lines
+  fi
+}
+
+cut -f2,3 "$WORK/plan" | while read -r job idx; do mkdir -p "$WORK/$job-$idx"; done
+say "$REPO@$TAG on $TYPE boxes, at most $MAX at once · logs $LOGDIR"
+reap || true
+PIDS=
+WAVES=$(cut -f1 "$WORK/plan" | sort -un)
+for w in $WAVES; do
+  while IFS=$'\t' read -r wave job idx st needs label note; do
+    [ "$wave" = "$w" ] || continue
+    id="$job-$idx"
+    mkdir -p "$WORK/$id"
+    if [ "$st" != run ]; then setstate "$id" "$st $note"; continue; fi
+    blocked=
+    [ "$needs" = - ] && needs=
+    for n in $(printf %s "$needs" | tr ',' ' '); do
+      for f in "$WORK/$n-"[0-9]*/state; do grep -qE '^(pass|incomplete)' "$f" || blocked="$blocked $n"; done
+    done
+    if [ -n "$blocked" ]; then setstate "$id" "skip needs$blocked"; continue; fi
+    setstate "$id" queued
+    while [ "$(jobs -rp | wc -l | tr -d ' ')" -ge "$MAX" ]; do board; sleep 2; done
+    (worker "$id" "$job" "$idx" "$label") </dev/null 2>>"$WORK/$id/err" & # stdin isn't the plan: ssh would eat it
+    PIDS="$PIDS $!"
+  done <"$WORK/plan"
+  # ponytail: a wave waits for all of the one before it; start each job when its own needs finish if waves get long.
+  while [ -n "$(jobs -rp)" ]; do board; sleep 2; done
+done
+board
+
+# --- summary ---
+rc=0
+total=0
+echo "--- perseids: $REPO@$TAG (${SHA}) · $WF" >&2
+while IFS=$'\t' read -r wave job idx st0 needs label note; do
+  id="$job-$idx"
+  st=$(cat "$WORK/$id/state")
+  start=$(cat "$WORK/$id/start" 2>/dev/null || echo 0)
+  end=$(cat "$WORK/$id/end" 2>/dev/null || echo "$start")
+  total=$((total + end - start))
+  printf '  %-12s %-44s %s\n' "${st%% *}" "${label:0:44}" "$(printf %s "$st" | cut -s -d' ' -f2-)" >&2
+  case ${st%% *} in
+    fail) rc=1 ;;
+    error) [ "$rc" = 1 ] || rc=99 ;;
+    incomplete | unsupported) [ "$rc" = 0 ] && rc=2 ;;
+  esac
+  if [ "${st%% *}" = fail ] || [ "${st%% *}" = error ]; then
+    [ -f "$LOGDIR/$id.log" ] && { echo "  ↳ $LOGDIR/$id.log, last ${PERSEIDS_TAIL:-40} lines:" >&2; tail -n "${PERSEIDS_TAIL:-40}" "$LOGDIR/$id.log" | sed 's/^/    | /' >&2; }
+  fi
+done <"$WORK/plan"
+echo "--- exit $rc · $(awk -v s="$total" -v p="$(price)" 'BEGIN{printf "%d box-min, about $%.2f", s/60, s/3600*p}') · logs $LOGDIR" >&2
+exit "$rc"

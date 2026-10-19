@@ -1,0 +1,18 @@
+{
+  "name": "perseids",
+  "version": "0.1.0",
+  "description": "Run your GitHub Actions CI on fresh cloud machines, every job at once, against your exact local commit. Adds /ci.",
+  "author": {
+    "name": "kkeeland"
+  },
+  "repository": "https://github.com/kkeeland/perseids",
+  "license": "MIT",
+  "homepage": "https://github.com/kkeeland/perseids",
+  "keywords": [
+    "ci",
+    "github-actions",
+    "testing",
+    "parallel",
+    "agents"
+  ]
+}

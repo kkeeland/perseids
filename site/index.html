@@ -1,0 +1,755 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Perseids</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&family=Urbanist:wght@700;800;900&display=swap">
+<style>
+/* Layout: a 1-bit desktop. Black ground, white line, halftone for depth. Every surface is an OS window you can
+   drag, minimize and close; the copy says exactly what the product does. Deliberately one dark world. */
+@property --lift { syntax: "<number>"; inherits: true; initial-value: 1 }
+:root {
+  color-scheme: dark;
+  --bk: #000000;      /* ground */
+  --wh: #ffffff;      /* line and type */
+  --g1: #a3a3a3;      /* secondary text */
+  --g2: #2e2e2e;      /* hairlines */
+  --g3: #111111;      /* quiet fills */
+  --dots: radial-gradient(circle, var(--wh) .85px, transparent 1.25px) 0 0 / 5px 5px;
+  --dots-lg: radial-gradient(circle, var(--wh) 1.1px, transparent 1.6px) 0 0 / 7px 7px;
+  --display: "Urbanist", "Avenir Next", "Helvetica Neue", Arial, sans-serif;
+  --body: "Geist", "Helvetica Neue", Arial, sans-serif;
+  --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --ease: cubic-bezier(.2, .9, .2, 1);
+  --spring: cubic-bezier(.3, 1.45, .5, 1);
+}
+* { box-sizing: border-box }
+html { background: var(--bk) }
+body { margin: 0; background: var(--bk); color: var(--wh); font: 400 15px/1.6 var(--body); -webkit-font-smoothing: antialiased; overflow-x: clip;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)) }
+a { color: inherit }
+::selection { background: var(--wh); color: var(--bk) }
+:focus-visible { outline: 2px solid var(--wh); outline-offset: 3px }
+button { font: inherit; color: inherit }
+.wrap { max-width: 1180px; margin: 0 auto }
+.mono { font-family: var(--mono) }
+.dim { color: var(--g1) }
+h1, h2, h3 { font-family: var(--display); margin: 0; text-wrap: balance }
+h2 { font-size: clamp(34px, 5vw, 60px); font-weight: 800; letter-spacing: -.035em; line-height: 1 }
+section { padding-block: clamp(80px, 11vw, 140px) }
+.eyebrow { display: inline-flex; align-items: center; gap: 10px; font: 500 12px/1 var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--g1); margin-bottom: 20px }
+.eyebrow::before { content: ""; width: 9px; height: 9px; background: var(--wh) }
+.sub { color: var(--g1); font-size: 17px; max-width: 58ch; margin: 18px 0 0 }
+
+/* ---------- the window ---------- */
+.win { position: relative; isolation: isolate; background: var(--bk); border: 2px solid var(--wh); min-width: 0;
+  transition: transform .5s var(--ease), opacity .35s }
+.win.stack::before, .win.stack::after { content: ""; position: absolute; inset: -2px; z-index: -1; pointer-events: none; background: var(--dots); }
+.win.stack::before { transform: translate(calc(var(--lift) * 12px), calc(var(--lift) * -12px)); outline: 2px solid var(--wh); outline-offset: -2px; background: var(--dots) }
+.win.stack::after { transform: translate(calc(var(--lift) * 24px), calc(var(--lift) * -24px)); background: var(--dots-lg); opacity: .8 }
+.win.stack > * { position: relative; background-color: var(--bk) } /* the halftone layers paint above the window's own fill, so every child covers them */
+.tb { display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 3px 0 0; border-bottom: 2px solid var(--wh); background: var(--bk); user-select: none }
+.tb .ttl { flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; gap: 8px; padding: 0 8px; font: 600 12px/1 var(--mono);
+  background: repeating-linear-gradient(var(--wh) 0 2px, var(--bk) 2px 4px) right 6px center / calc(100% - 12px) 12px no-repeat; }
+.tb .ttl span { background: var(--wh); color: var(--bk); padding: 3px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100% }
+.ctl { display: flex; gap: 3px }
+.ctl button { width: 18px; height: 18px; border: 2px solid var(--wh); background: var(--bk); padding: 0; cursor: pointer; display: grid; place-items: center; transition: background .15s, color .15s }
+.ctl button:hover { background: var(--wh); color: var(--bk) }
+.ctl button::before { content: ""; display: block; background: currentColor }
+.ctl .min::before { width: 8px; height: 2px; margin-top: 5px }
+.ctl .max::before { width: 7px; height: 7px; background: none; border: 2px solid currentColor }
+.ctl .x::before { width: 9px; height: 9px; background: linear-gradient(45deg, transparent 43%, currentColor 43% 57%, transparent 57%), linear-gradient(-45deg, transparent 43%, currentColor 43% 57%, transparent 57%) }
+.body { padding: 18px 20px; overflow: hidden; transition: max-height .45s var(--ease), padding .45s var(--ease) }
+.win.minimized > .body { max-height: 0 !important; padding-block: 0 }
+.win.big { transform: scale(1.035); z-index: 5 }
+.win.gone { transform: scale(.2); opacity: 0; pointer-events: none }
+.drag .tb .ttl { cursor: grab }
+.drag.dragging .tb .ttl { cursor: grabbing }
+.term { margin: 0; font: 400 13px/1.75 var(--mono); white-space: pre; overflow-x: auto; scrollbar-width: none }
+.term b { font-weight: 600 } .term i { font-style: normal; color: var(--g1) } .term u { text-decoration: none; background: var(--wh); color: var(--bk); padding: 0 3px }
+.caret::after { content: ""; display: inline-block; width: .55em; height: 1.05em; background: var(--wh); vertical-align: -.18em; margin-left: 2px; animation: caret 1s steps(1) infinite }
+@keyframes caret { 50% { opacity: 0 } }
+
+/* folder a closed window turns into */
+.folder { position: absolute; display: grid; justify-items: center; gap: 6px; background: none; border: 0; cursor: pointer; padding: 6px; animation: pop .45s var(--spring) }
+.folder svg { width: 58px; height: 46px }
+.folder span { font: 600 11px/1 var(--mono); background: var(--wh); color: var(--bk); padding: 3px 6px; white-space: nowrap }
+@keyframes pop { from { transform: scale(.3); opacity: 0 } }
+
+/* ---------- nav ---------- */
+nav { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 50; background: var(--bk); border-bottom: 1px solid var(--g2);
+  margin-left: calc(-1 * max(16px, env(safe-area-inset-left, 0px))); margin-right: calc(-1 * max(16px, env(safe-area-inset-right, 0px)));
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)) }
+.navin { max-width: 1180px; margin: 0 auto; height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 16px }
+.logo { display: inline-flex; align-items: center; gap: 10px; text-decoration: none }
+.logo .lb { font: 800 18px/1 var(--display); letter-spacing: -.02em; background: var(--wh); color: var(--bk); padding: 5px 9px 6px }
+.logo .pr { font: 600 12px/1 var(--mono); color: var(--g1) }
+.links { display: flex; align-items: center; gap: clamp(14px, 2.6vw, 30px); font-size: 14px }
+.links a { text-decoration: none; color: var(--g1); transition: color .2s }
+.links a:hover { color: var(--wh) }
+.btn { display: inline-flex; align-items: center; gap: 10px; height: 40px; padding: 0 16px; border: 2px solid var(--wh); font: 600 14px/1 var(--mono); text-decoration: none; cursor: pointer;
+  background: var(--bk); color: var(--wh); position: relative; transition: background .2s, color .2s, transform .35s var(--spring), box-shadow .35s var(--spring) }
+.btn:hover { background: var(--wh); color: var(--bk); box-shadow: 5px 5px 0 0 var(--g2) }
+.btn:active { transform: translate(2px, 2px); box-shadow: none }
+.btn.inv { background: var(--wh); color: var(--bk) }
+.btn.inv:hover { background: var(--bk); color: var(--wh); box-shadow: 6px 6px 0 -2px var(--bk), 6px 6px 0 0 var(--wh) }
+@media (max-width: 720px) { .links .wide { display: none } }
+
+/* ---------- hero ---------- */
+.hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: clamp(40px, 6vw, 80px); align-items: center; padding-block: clamp(64px, 9vw, 120px) clamp(72px, 9vw, 120px) }
+.hero h1 { font-size: clamp(52px, 7.6vw, 104px); font-weight: 900; letter-spacing: -.05em; line-height: .9 }
+.hero h1 .blk { display: inline-block; background: var(--wh); color: var(--bk); padding: 0 .12em .06em; margin-top: .08em }
+.install { margin-top: 30px; display: flex; align-items: stretch; max-width: 520px; border: 2px solid var(--wh) }
+.install code { flex: 1; min-width: 0; display: flex; align-items: center; padding: 0 14px; font: 400 13.5px/1 var(--mono); white-space: nowrap; overflow-x: auto; scrollbar-width: none; height: 46px }
+.install code::before { content: "$"; color: var(--g1); margin-right: 10px }
+.install button { border: 0; border-left: 2px solid var(--wh); background: var(--wh); color: var(--bk); font: 600 13px/1 var(--mono); padding: 0 16px; cursor: pointer; transition: background .2s, color .2s }
+.install button:hover { background: var(--bk); color: var(--wh) }
+.heroctas { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 14px }
+.note { margin-top: 18px; font: 400 12.5px/1.5 var(--mono); color: var(--g1) }
+.art { position: relative; isolation: isolate; min-height: 460px; padding: 30px 30px 0 0 }
+.art .w1 { position: absolute; left: 6%; right: 6%; top: 40px }
+.art .w2 { position: absolute; width: 46%; right: 0; bottom: 18px }
+.art .w2 .body { padding: 14px 16px }
+.bin { position: absolute; font: 600 12px/1.35 var(--mono); letter-spacing: .5em; white-space: pre; pointer-events: none; user-select: none }
+.art .bin { left: -8px; bottom: -18px; z-index: -1 } /* behind the windows: only its edges show */
+@media (max-width: 900px) {
+  .hero { grid-template-columns: minmax(0, 1fr) }
+  .art { min-height: 400px; padding-right: 26px }
+  .art .w1 { left: 0; right: 26px }
+  .art .w2 { width: 62% }
+}
+
+/* ---------- marquee ---------- */
+.marq { border-block: 2px solid var(--wh); overflow: hidden; margin-left: calc(-1 * max(16px, env(safe-area-inset-left, 0px))); margin-right: calc(-1 * max(16px, env(safe-area-inset-right, 0px))) }
+.marq div { display: flex; gap: 0; width: max-content; animation: marq 40s linear infinite; font: 600 13px/1 var(--mono) }
+.marq span { padding: 16px 22px; border-right: 2px solid var(--wh); white-space: nowrap }
+.marq span:nth-child(4n+1) { background: var(--wh); color: var(--bk) }
+@keyframes marq { to { transform: translateX(-50%) } }
+
+/* ---------- demo ---------- */
+.demo { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 36px; margin-top: 52px; align-items: start }
+.ctrl .body { display: grid; gap: 14px }
+.ctrl .row { display: flex; justify-content: space-between; gap: 12px; font: 400 12.5px/1.5 var(--mono) }
+.ctrl .row b { font-weight: 600 }
+.jobs { display: grid; gap: 4px; font: 400 12.5px/1.6 var(--mono); padding: 12px 0; border-block: 1px dashed var(--g2) }
+.jobs div { display: flex; justify-content: space-between }
+.runbtn { width: 100%; height: 54px; justify-content: center; font-size: 16px; letter-spacing: .06em }
+.runbtn[data-busy] { pointer-events: none; background: var(--dots), var(--bk); color: var(--wh) }
+.pulse { animation: pulse 2.4s infinite }
+@keyframes pulse { 0%, 70%, 100% { box-shadow: 0 0 0 0 var(--wh) } 35% { box-shadow: 0 0 0 6px transparent } }
+.vs { display: grid; gap: 10px; font: 400 12px/1.4 var(--mono) }
+.vs div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px }
+.vs .track { grid-column: 1 / -1; height: 10px; border: 1.5px solid var(--wh) }
+.vs .fill { display: block; height: 100%; width: calc(var(--p, 0) * 100%); background: var(--wh) }
+.vs .them .fill { background: var(--dots), var(--bk) }
+.verdict { font: 600 13px/1.5 var(--mono); min-height: 3em }
+.verdict u { text-decoration: none; background: var(--wh); color: var(--bk); padding: 1px 6px }
+.machines { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px }
+.slot { position: relative; min-height: 206px; border: 2px dashed var(--g2); display: grid; align-content: start; min-width: 0 }
+.slot .idle { padding: 12px; font: 400 11.5px/1.5 var(--mono); color: var(--g1) }
+.slot .win { position: absolute; inset: -2px }
+.mach .tb .ttl span { font-size: 11px }
+.mach .body { padding: 10px 12px; font: 400 11px/1.6 var(--mono); display: grid; gap: 2px; align-content: start; height: calc(100% - 26px) }
+.mach .body div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.mach .prog { margin-top: 6px; letter-spacing: -.5px }
+.mach .tm { font-weight: 600; margin-top: 2px }
+.mach.ok .body { background: var(--wh); color: var(--bk) }
+.mach.ok .ok-lbl { display: block }
+.ok-lbl { display: none; font: 900 26px/1 var(--display); letter-spacing: -.02em; margin-top: 4px }
+.mach.deleted { border-style: dashed; border-color: var(--g2) }
+.mach.deleted .tb { border-color: var(--g2); opacity: .5 }
+.mach.deleted .body { background: var(--bk); color: var(--g1) }
+@media (max-width: 1000px) { .demo { grid-template-columns: minmax(0, 1fr) } }
+@media (max-width: 640px) { .machines { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px } .slot { min-height: 196px } }
+
+/* ---------- time ---------- */
+.time { margin-top: 48px; display: grid; gap: 22px; max-width: 980px }
+.tl { display: grid; grid-template-columns: 150px minmax(0, 1fr) 80px; gap: 16px; align-items: center; font: 500 13px/1.3 var(--mono) }
+.tl .t { text-align: right; font-weight: 600 }
+.seq { display: flex; gap: 3px; height: 34px }
+.seq span { height: 100%; border: 2px solid var(--wh); flex: 0 0 auto; transform-origin: left }
+.seq span:nth-child(odd) { background: var(--dots) }
+.par { display: grid; gap: 4px }
+.par span { display: block; height: 6px; background: var(--wh); transform-origin: left }
+.axis { display: grid; grid-template-columns: 150px minmax(0, 1fr) 80px; gap: 16px; font: 400 11px/1 var(--mono); color: var(--g1) }
+.axis div { display: flex; justify-content: space-between; border-top: 1px solid var(--g2); padding-top: 8px }
+@media (max-width: 640px) { .tl, .axis { grid-template-columns: 76px minmax(0, 1fr) 54px; gap: 8px; font-size: 11.5px } }
+
+/* ---------- how ---------- */
+.how { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px 32px; margin-top: 56px }
+.how .body p { margin: 0 0 14px; color: var(--g1) }
+.how h3 { font-size: 26px; font-weight: 800; letter-spacing: -.03em; margin-bottom: 10px }
+.how code { display: block; font: 400 12.5px/1.6 var(--mono); padding: 10px 12px; border: 1px solid var(--g2); white-space: nowrap; overflow-x: auto }
+@media (max-width: 900px) { .how { grid-template-columns: minmax(0, 1fr); padding-right: 24px } }
+
+/* ---------- features as folders ---------- */
+.files { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 28px 18px; margin-top: 56px }
+.file { display: grid; justify-items: center; gap: 10px; text-align: center; background: none; border: 0; padding: 10px 6px; cursor: pointer; color: var(--wh) }
+.file svg { width: 76px; height: 60px; transition: transform .4s var(--spring) }
+.file:hover svg, .file[aria-expanded="true"] svg { transform: translateY(-6px) rotate(-3deg) }
+.file b { font: 600 12px/1.2 var(--mono); background: var(--wh); color: var(--bk); padding: 4px 7px }
+.file small { font: 400 12.5px/1.45 var(--body); color: var(--g1); max-width: 22ch }
+.file[aria-expanded="true"] b { outline: 2px solid var(--wh); outline-offset: 3px }
+.open { margin-top: 34px; max-width: 760px }
+.open .term { white-space: pre-wrap }
+@media (max-width: 960px) { .files { grid-template-columns: repeat(3, minmax(0, 1fr)) } }
+@media (max-width: 520px) { .files { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
+
+/* ---------- readme window with tabs ---------- */
+.docs { margin-top: 52px; padding-right: 26px }
+.tabs { display: flex; gap: 0; border-bottom: 2px solid var(--wh); overflow-x: auto; scrollbar-width: none }
+.tabs button { border: 0; border-right: 2px solid var(--wh); background: var(--bk); padding: 10px 16px; font: 600 12.5px/1 var(--mono); cursor: pointer; white-space: nowrap; transition: background .2s, color .2s }
+.tabs button[aria-selected="true"] { background: var(--wh); color: var(--bk) }
+.tabs button:not([aria-selected="true"]):hover { background: var(--g3) }
+.pane { max-height: 620px; overflow-y: auto; padding: 32px 36px 40px; scrollbar-color: var(--wh) var(--bk); scrollbar-width: thin }
+.pane[hidden] { display: none }
+.md { max-width: 760px; font-size: 14.5px; line-height: 1.65 }
+.md h3 { font: 800 30px/1.1 var(--display); letter-spacing: -.03em; margin: 0 0 10px }
+.md h4 { font: 600 13px/1 var(--mono); text-transform: uppercase; letter-spacing: .06em; margin: 34px 0 12px; display: flex; align-items: center; gap: 10px }
+.md h4::after { content: ""; flex: 1; height: 1px; background: var(--g2) }
+.md p { margin: 0 0 12px; color: var(--g1); max-width: 66ch }
+.md pre { margin: 0 0 12px; border: 1px solid var(--g2); padding: 12px 14px; font: 400 12.5px/1.7 var(--mono); overflow-x: auto }
+.md code { font-family: var(--mono); font-size: .88em; border: 1px solid var(--g2); padding: 1px 5px }
+.md pre code { border: 0; padding: 0; font-size: inherit }
+.md table { width: 100%; border-collapse: collapse; font-size: 13.5px; margin: 0 0 12px }
+.md th, .md td { text-align: left; padding: 9px 10px; border: 1px solid var(--g2); vertical-align: top }
+.md th { font: 600 11.5px/1 var(--mono); text-transform: uppercase; letter-spacing: .05em; background: var(--g3) }
+.md td:first-child { white-space: nowrap }
+.md td { color: var(--g1) } .md td:first-child { color: var(--wh) }
+.md ul { margin: 0 0 12px; padding-left: 18px; color: var(--g1) }
+.tblwrap { overflow-x: auto }
+@media (max-width: 640px) { .pane { padding: 22px 18px 28px } }
+
+/* ---------- pricing ---------- */
+.price { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 32px; margin-top: 52px; padding-right: 26px }
+.ptable { width: 100%; border-collapse: collapse; font: 400 14px/1.4 var(--mono) }
+.ptable th { text-align: left; font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--g1); padding: 0 0 12px; border-bottom: 2px solid var(--wh) }
+.ptable td { padding: 16px 0; border-bottom: 1px solid var(--g2) }
+.ptable .r { text-align: right }
+.ptable .big { font: 800 30px/1 var(--display); letter-spacing: -.02em }
+.terms { display: grid; gap: 10px; font: 400 13.5px/1.5 var(--mono); margin: 0; padding: 0; list-style: none }
+.terms li { position: relative; padding-left: 26px }
+.terms li::before { content: "■"; position: absolute; left: 0; font-size: 10px; line-height: 2 }
+@media (max-width: 860px) { .price { grid-template-columns: minmax(0, 1fr) } }
+.plugs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 40px 32px; margin-top: 52px; padding-right: 26px }
+.plugs .body p { margin: 0 0 14px; color: var(--g1); font-size: 14px }
+.plugs h3 { font-size: 28px; font-weight: 800; letter-spacing: -.03em; margin-bottom: 8px }
+.anyagent { margin-top: 40px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; font: 400 13px/1.5 var(--mono); color: var(--g1) }
+.anyagent code { color: var(--wh); border: 1px solid var(--g2); padding: 8px 12px; white-space: normal }
+.byo { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr); gap: 40px; margin-top: 52px; align-items: start; padding-right: 26px }
+.ptable caption { text-align: left; font: 600 12px/1 var(--mono); text-transform: uppercase; letter-spacing: .05em; padding-bottom: 14px }
+@media (max-width: 860px) { .plugs, .byo { grid-template-columns: minmax(0, 1fr) } }
+
+/* ---------- end ---------- */
+.end { text-align: left; border-top: 2px solid var(--wh); position: relative }
+.end h2 { font-size: clamp(48px, 9vw, 128px); letter-spacing: -.05em; line-height: .88 }
+.end .install { margin-top: 36px }
+.end .bin { right: 0; top: 60px; opacity: .9 }
+@media (max-width: 760px) { .end .bin { display: none } }
+footer { border-top: 1px solid var(--g2); padding-block: 26px calc(26px + env(safe-area-inset-bottom, 0px)); display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; font: 400 12.5px/1.5 var(--mono); color: var(--g1) }
+
+/* ---------- click burst and cursor ---------- */
+.burst { position: fixed; z-index: 100; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%; pointer-events: none; background: var(--dots);
+  -webkit-mask: radial-gradient(circle, transparent 38%, #000 40% 62%, transparent 64%); mask: radial-gradient(circle, transparent 38%, #000 40% 62%, transparent 64%);
+  animation: burst .6s var(--ease) forwards }
+@keyframes burst { from { transform: scale(.1); opacity: 1 } to { transform: scale(1.4); opacity: 0 } }
+.cur { position: fixed; z-index: 99; left: 0; top: 0; width: 14px; height: 14px; margin: -7px 0 0 -7px; background: var(--wh); mix-blend-mode: difference; pointer-events: none;
+  transition: width .25s var(--spring), height .25s var(--spring), margin .25s var(--spring); will-change: transform }
+.cur.on { width: 42px; height: 42px; margin: -21px 0 0 -21px }
+@media (pointer: coarse) { .cur { display: none } }
+
+/* ---------- scroll: windows lift their halftone shadows as they arrive ---------- */
+@supports (animation-timeline: view()) {
+  .win.stack { animation: lift linear both; animation-timeline: view(); animation-range: entry 0% cover 45% }
+  @keyframes lift { from { --lift: 0 } to { --lift: 1 } }
+  .rise { animation: rise linear both; animation-timeline: view(); animation-range: entry 0% cover 30% }
+  @keyframes rise { from { transform: translateY(40px) } to { transform: none } }
+}
+@media (prefers-reduced-motion: reduce) {
+  .win.stack, .rise { animation: none !important } .marq div { animation: none } .pulse { animation: none } .caret::after { animation: none }
+}
+</style>
+
+<div class="cur" id="cur" aria-hidden="true"></div>
+
+<nav>
+  <div class="navin">
+    <a class="logo" href="#top"><span class="lb">perseids</span><span class="pr caret">$</span></a>
+    <div class="links">
+      <a class="wide" href="#demo">Demo</a><a class="wide" href="#plugins">Plugins</a><a class="wide" href="#docs">Docs</a><a class="wide" href="#pricing">Pricing</a><a href="https://github.com/kkeeland/perseids">GitHub</a>
+      <a class="btn inv" href="#access">Get access</a>
+    </div>
+  </div>
+</nav>
+
+<main class="wrap" id="top">
+  <header class="hero">
+    <div>
+      <p class="eyebrow">Open source · MIT · Claude Code and Codex plugins</p>
+      <h1 data-scramble>Run every CI job <span class="blk">at once.</span></h1>
+      <p class="sub">Perseids runs each job in your GitHub Actions workflow on its own fresh cloud machine, all at the same time, against your exact local commit. Your CI takes as long as its slowest job. No push, no runners, no YAML changes.</p>
+      <div class="install"><code id="inst">git clone https://github.com/kkeeland/perseids ~/.perseids</code><button type="button" data-copy="#inst">COPY</button></div>
+      <div class="heroctas"><a class="btn" href="#demo">See it run ↓</a><a class="btn" href="https://github.com/kkeeland/perseids">View on GitHub</a></div>
+      <p class="note">Then <span style="color:#fff">perseids key</span> with your Boat key, and <span style="color:#fff">perseids run</span>. macOS and Linux.</p>
+    </div>
+    <div class="art" id="art">
+      <div class="win stack drag w1" data-name="terminal">
+        <div class="tb"><div class="ttl"><span>~/acme-web</span></div><div class="ctl"><button class="min" aria-label="Minimize"></button><button class="max" aria-label="Enlarge"></button><button class="x" aria-label="Close"></button></div></div>
+        <div class="body"><pre class="term" id="heroTerm"><b>$ perseids run</b>
+<i>acme-web@3f2a91c0 · 8 jobs · 8 machines</i>
+<u>pass</u> lint                  1m10s
+<u>pass</u> typecheck             1m45s
+<u>pass</u> unit                  4m20s
+<u>pass</u> integration           6m40s
+<u>pass</u> e2e (1/3)             5m50s
+<u>pass</u> e2e (2/3)             6m05s
+<u>pass</u> e2e (3/3)             5m35s
+<u>pass</u> build                 3m15s
+<b>exit 0 · 6m40s</b> <i>· 8 machines deleted</i></pre></div>
+      </div>
+      <div class="win stack drag w2" data-name="ci.yml">
+        <div class="tb"><div class="ttl"><span>ci.yml</span></div><div class="ctl"><button class="min" aria-label="Minimize"></button><button class="x" aria-label="Close"></button></div></div>
+        <div class="body"><pre class="term" style="font-size:11.5px">jobs:
+  unit:
+    runs-on: ubuntu-latest
+  e2e:
+    strategy:
+      matrix:
+        shard: [1, 2, 3]</pre></div>
+      </div>
+      <div class="bin" id="bin1" aria-hidden="true"></div>
+    </div>
+  </header>
+</main>
+
+<div class="marq" aria-hidden="true"><div id="marq"></div></div>
+
+<main class="wrap">
+  <section id="demo">
+    <p class="eyebrow">Demo</p>
+    <h2 data-scramble>Press run. Eight machines start at once.</h2>
+    <p class="sub">An example workflow with eight jobs. Each one gets its own machine. The run ends when the slowest job ends, then every machine is deleted.</p>
+    <div class="demo">
+      <div class="win stack ctrl">
+        <div class="tb"><div class="ttl"><span>perseids</span></div><div class="ctl"><button class="min" aria-label="Minimize"></button></div></div>
+        <div class="body">
+          <div class="row"><b>acme-web@3f2a91c0</b><span class="dim">ci.yml</span></div>
+          <div class="jobs" id="jobList"></div>
+          <button class="btn inv runbtn pulse" id="run" type="button">RUN ▸</button>
+          <div class="vs">
+            <div class="us"><span>perseids</span><b id="usT">0:00</b><span class="track"><span class="fill" id="usF"></span></span></div>
+            <div class="them"><span>one at a time</span><b id="themT">0:00</b><span class="track"><span class="fill" id="themF"></span></span></div>
+          </div>
+          <div class="verdict" id="verdict" aria-live="polite">Press run. Times play 60× faster.</div>
+        </div>
+      </div>
+      <div class="machines" id="machines"></div>
+    </div>
+  </section>
+
+  <section style="padding-top:0">
+    <p class="eyebrow">Why it's faster</p>
+    <h2 data-scramble>Your CI takes as long as its slowest job.</h2>
+    <p class="sub">One after another, you wait for every job added together. All at once, you wait for the longest. The same eight jobs, to scale:</p>
+    <div class="time" id="time">
+      <div class="tl"><span>one at a time</span><div class="seq" id="seq"></div><span class="t">34m40s</span></div>
+      <div class="tl"><span>perseids</span><div class="par" id="par"></div><span class="t">6m40s</span></div>
+      <div class="axis"><span></span><div><span>0</span><span>10m</span><span>20m</span><span>30m</span></div><span></span></div>
+    </div>
+  </section>
+
+  <section style="padding-top:0">
+    <p class="eyebrow">How it works</p>
+    <h2 data-scramble>Read. Run. Report.</h2>
+    <div class="how">
+      <div class="win stack rise"><div class="tb"><div class="ttl"><span>01 read</span></div></div><div class="body"><h3>Read</h3><p>Perseids parses your workflow in <span class="mono">.github/workflows</span>, expands every matrix and orders jobs by <span class="mono">needs:</span>.</p><code>perseids run</code></div></div>
+      <div class="win stack rise"><div class="tb"><div class="ttl"><span>02 run</span></div></div><div class="body"><h3>Run</h3><p>Each job and matrix entry starts on its own fresh Linux machine with your git history, its services and its toolchain. All at once.</p><code>8 jobs → 8 machines</code></div></div>
+      <div class="win stack rise"><div class="tb"><div class="ttl"><span>03 report</span></div></div><div class="body"><h3>Report</h3><p>Logs come back, every machine is deleted, and the run exits with one code your agent can act on.</p><code>exit 0 · 1 · 2 · 99</code></div></div>
+    </div>
+  </section>
+
+  <section style="padding-top:0" id="plugins">
+    <p class="eyebrow">Plugins</p>
+    <h2 data-scramble>Your agent runs CI before it says done.</h2>
+    <p class="sub">Install the plugin and your agent commits, runs every job, reads the exit code, and fixes only what failed.</p>
+    <div class="plugs">
+      <div class="win stack rise"><div class="tb"><div class="ttl"><span>claude code</span></div><div class="ctl"><button class="min" aria-label="Minimize"></button></div></div><div class="body">
+        <h3>Claude Code</h3><p>Adds the Perseids skill and a <span class="mono">/ci</span> command.</p>
+<pre class="term"><b>/plugin marketplace add kkeeland/perseids</b>
+<b>/plugin install perseids@perseids</b>
+
+<i># then, in any repo</i>
+/ci</pre></div></div>
+      <div class="win stack rise"><div class="tb"><div class="ttl"><span>codex</span></div><div class="ctl"><button class="min" aria-label="Minimize"></button></div></div><div class="body">
+        <h3>Codex</h3><p>Adds the Perseids skill to Codex.</p>
+<pre class="term"><b>$ codex plugin marketplace add kkeeland/perseids</b>
+<b>$ codex plugin add perseids@perseids</b>
+Added plugin `perseids` from marketplace `perseids`.</pre></div></div>
+    </div>
+    <div class="anyagent"><span>Any other agent: add one line to AGENTS.md</span><code>Before saying work is done, commit and run `perseids run`. Report the SHA and the exit code.</code></div>
+  </section>
+
+  <section style="padding-top:0" id="byo">
+    <p class="eyebrow">Open source</p>
+    <h2 data-scramble>Your Boat key. Boat's price. No markup.</h2>
+    <p class="sub">The CLI is MIT licensed. It runs your jobs on <a href="https://boat.dev">Boat</a> machines in your own account, so you pay Boat directly.</p>
+    <div class="byo">
+      <div class="win stack rise"><div class="tb"><div class="ttl"><span>~/your-repo</span></div><div class="ctl"><button class="min" aria-label="Minimize"></button></div></div><div class="body">
+<pre class="term"><b>$ git clone https://github.com/kkeeland/perseids ~/.perseids</b>
+<b>$ ln -s ~/.perseids/bin/perseids /usr/local/bin/perseids</b>
+
+<b>$ perseids key</b>
+Boat API key (boat.dev, Settings, API keys): ••••••••
+perseids: key saved to ~/.config/perseids/boat.env; perseids run will use it
+
+<b>$ perseids run</b>
+<u>pass</u> unit  <u>pass</u> e2e (1/3)  <u>pass</u> e2e (2/3)  <u>pass</u> build
+<b>exit 0</b></pre></div></div>
+      <ul class="terms">
+        <li>The key is checked with Boat, then saved with mode 600. It's never printed and never sent to a machine.</li>
+        <li>Agents are told to ask you to run <span class="mono">perseids key</span>, never to paste a key into chat.</li>
+        <li>Every machine is deleted when its job ends, so you pay only while jobs run.</li>
+        <li><a href="https://github.com/kkeeland/perseids">github.com/kkeeland/perseids</a></li>
+      </ul>
+    </div>
+  </section>
+
+  <section style="padding-top:0">
+    <p class="eyebrow">What it does · click a folder</p>
+    <h2 data-scramble>Everything a runner does. None of the waiting.</h2>
+    <div class="files" id="files"></div>
+    <div class="win stack open" id="openWin" hidden>
+      <div class="tb"><div class="ttl"><span id="openTtl">file</span></div><div class="ctl"><button class="x" id="openClose" aria-label="Close"></button></div></div>
+      <div class="body"><pre class="term" id="openBody"></pre></div>
+    </div>
+  </section>
+
+  <section style="padding-top:0" id="docs">
+    <p class="eyebrow">Docs</p>
+    <h2 data-scramble>The whole manual fits in one window.</h2>
+    <div class="win stack docs">
+      <div class="tb"><div class="ttl"><span>perseids / docs</span></div><div class="ctl"><button class="min" aria-label="Minimize"></button><button class="max" aria-label="Enlarge"></button></div></div>
+      <div class="tabs" role="tablist">
+        <button role="tab" aria-selected="true" aria-controls="p-readme" id="t-readme">README.md</button>
+        <button role="tab" aria-selected="false" aria-controls="p-help" id="t-help">perseids --help</button>
+        <button role="tab" aria-selected="false" aria-controls="p-quick" id="t-quick">quickstart.md</button>
+      </div>
+      <div class="pane md" role="tabpanel" id="p-readme" aria-labelledby="t-readme">
+        <h3>perseids</h3>
+        <p>Run every job in your GitHub Actions workflow at the same time, each on a fresh cloud machine, against your exact local commit. One exit code when it's done.</p>
+        <h4>Install</h4>
+<pre><code>git clone https://github.com/kkeeland/perseids ~/.perseids
+ln -s ~/.perseids/bin/perseids /usr/local/bin/perseids</code></pre>
+        <p>Needs <code>bash</code>, <code>git</code>, <code>jq</code>, <code>curl</code>, <code>ssh</code> and Ruby 2.6+. MIT licensed.</p>
+        <h4>Add your Boat key</h4>
+<pre><code>perseids key        # asks once, checks it with Boat, saves it with mode 600</code></pre>
+        <h4>Quick start</h4>
+<pre><code>cd your-repo
+perseids run        # every job in .github/workflows/ci.yml</code></pre>
+        <h4>Commands</h4>
+        <div class="tblwrap"><table>
+          <tr><th>Command</th><th>What it does</th></tr>
+          <tr><td><code>run [job...]</code></td><td>Run the workflow, or only the named jobs. Each matrix entry gets its own machine.</td></tr>
+          <tr><td><code>exec '&lt;cmd&gt;'</code></td><td>Run one command on one machine against your commit.</td></tr>
+          <tr><td><code>key</code></td><td>Save your Boat API key.</td></tr>
+          <tr><td><code>ls</code> · <code>reap</code></td><td>List your running machines. Delete ones left by a killed run.</td></tr>
+        </table></div>
+        <h4>Flags</h4>
+        <div class="tblwrap"><table>
+          <tr><th>Flag</th><th>Effect</th></tr>
+          <tr><td><code>-w &lt;file&gt;</code></td><td>Use another workflow file.</td></tr>
+          <tr><td><code>--keep-going</code></td><td>Don't stop a job at its first failing step.</td></tr>
+          <tr><td><code>--dirty</code></td><td>Include uncommitted changes to tracked files.</td></tr>
+        </table></div>
+        <h4>Exit codes</h4>
+        <div class="tblwrap"><table>
+          <tr><th>Code</th><th>Meaning</th></tr>
+          <tr><td><code>0</code></td><td>Every job passed.</td></tr>
+          <tr><td><code>1</code></td><td>A job failed. The summary names the step and prints the end of its log.</td></tr>
+          <tr><td><code>2</code></td><td>Incomplete. Something couldn't run on a machine (macOS, Windows, container jobs). Never reported as green.</td></tr>
+          <tr><td><code>99</code></td><td>A machine failed, not your code. Run it again.</td></tr>
+        </table></div>
+        <h4>Configuration</h4>
+        <div class="tblwrap"><table>
+          <tr><th>Variable</th><th>Default</th><th>Effect</th></tr>
+          <tr><td><code>PERSEIDS_TYPE</code></td><td><code>large</code></td><td>Machine size: <code>large</code> or <code>xlarge</code>.</td></tr>
+          <tr><td><code>PERSEIDS_MAX</code></td><td><code>10</code></td><td>Machines at once, up to your account limit.</td></tr>
+          <tr><td><code>PERSEIDS_TTL</code></td><td><code>7200</code></td><td>Seconds before a machine stops itself.</td></tr>
+          <tr><td><code>PERSEIDS_EVENT</code></td><td><code>push</code></td><td>The <code>github.event_name</code> your <code>if:</code> conditions see.</td></tr>
+        </table></div>
+        <h4>Limits</h4>
+        <ul><li>Linux jobs only. macOS, Windows and <code>container:</code> jobs are reported as skipped.</li><li>Secrets are never sent to machines. Steps that need one are skipped.</li><li>Reusable workflows aren't supported yet.</li></ul>
+        <h4>Use with agents</h4>
+<pre><code># Claude Code
+/plugin marketplace add kkeeland/perseids
+/plugin install perseids@perseids
+
+# Codex
+codex plugin marketplace add kkeeland/perseids
+codex plugin add perseids@perseids
+
+# AGENTS.md or CLAUDE.md
+Before saying work is done, commit and run `perseids run`.
+Report the SHA and the exit code.</code></pre>
+      </div>
+      <div class="pane" role="tabpanel" id="p-help" aria-labelledby="t-help" hidden>
+<pre class="term"><b>$ perseids --help</b>
+perseids: run your GitHub Actions jobs on fresh cloud machines, all at once
+
+<i>USAGE</i>
+  perseids run [job...] [-w workflow] [--keep-going] [--dirty]
+  perseids exec '&lt;command&gt;'
+  perseids key
+  perseids ls | reap
+
+<i>EXIT CODES</i>
+  0  passed          1  a job failed
+  2  incomplete      99 a machine failed
+
+<b>$ perseids key</b>
+Boat API key (boat.dev, Settings, API keys): ••••••••
+perseids: key saved to ~/.config/perseids/boat.env
+
+<b>$ perseids run unit e2e</b>
+acme-web@3f2a91c0 · 4 jobs on 4 machines
+<u>pass</u> unit                  4m20s
+<u>pass</u> e2e (1/3)             5m50s
+<b>FAIL</b> e2e (2/3)             3m12s
+<u>pass</u> e2e (3/3)             5m35s
+<i>↳ step "npx playwright test", last 3 lines:</i>
+  ✘ checkout.spec.ts:41 applies the discount code
+    Expected: "$90.00"  Received: "$100.00"
+  1 failed, 63 passed (3.1m)
+<b>exit 1 · 5m50s</b> <i>· logs ~/.local/state/perseids/logs</i></pre>
+      </div>
+      <div class="pane md" role="tabpanel" id="p-quick" aria-labelledby="t-quick" hidden>
+        <h3>Quickstart</h3>
+        <p>Run your existing GitHub Actions workflow on Perseids in about two minutes. You need a repo with a workflow in <code>.github/workflows</code>.</p>
+        <h4>1 · Install</h4>
+<pre><code>git clone https://github.com/kkeeland/perseids ~/.perseids
+ln -s ~/.perseids/bin/perseids /usr/local/bin/perseids</code></pre>
+        <h4>2 · Add your Boat key</h4>
+        <p>Create one in Boat under Settings, API keys. Perseids checks it and keeps it in <code>~/.config/perseids/boat.env</code>.</p>
+<pre><code>perseids key</code></pre>
+        <h4>3 · Run</h4>
+        <p>From the repo root. Perseids tests the current commit, so commit first or pass <code>--dirty</code>. It picks <code>ci.yml</code>, or the only workflow there is; choose another with <code>-w</code>.</p>
+<pre><code>perseids run</code></pre>
+        <h4>4 · Read the result</h4>
+        <p>The last line is the verdict: <code>exit 0</code> means every job passed. Full logs for each job are in <code>~/.local/state/perseids/logs</code>.</p>
+      </div>
+    </div>
+  </section>
+
+  <section style="padding-top:0" id="pricing">
+    <p class="eyebrow">Pricing</p>
+    <h2 data-scramble>Pay Boat directly, or let us run it.</h2>
+    <div class="price">
+      <div class="win stack"><div class="tb"><div class="ttl"><span>open-source.txt</span></div></div><div class="body">
+        <table class="ptable">
+          <caption>Open source · your Boat account</caption>
+          <thead><tr><th>Machine</th><th>Size</th><th class="r">Per minute</th></tr></thead>
+          <tbody>
+            <tr><td>large</td><td class="dim">8 vCPU · 16 GB</td><td class="r big">$0.0012</td></tr>
+            <tr><td>xlarge</td><td class="dim">16 vCPU</td><td class="r big">$0.0033</td></tr>
+          </tbody>
+        </table>
+        <p class="note">Boat's list price. Perseids adds nothing.</p>
+      </div></div>
+      <div class="win stack"><div class="tb"><div class="ttl"><span>cloud.txt</span></div></div><div class="body">
+        <table class="ptable">
+          <caption>Perseids Cloud · early access</caption>
+          <thead><tr><th>Machine</th><th>Size</th><th class="r">Per minute</th></tr></thead>
+          <tbody>
+            <tr><td>large</td><td class="dim">8 vCPU · 16 GB</td><td class="r big">$0.0024</td></tr>
+            <tr><td>xlarge</td><td class="dim">16 vCPU</td><td class="r big">$0.0067</td></tr>
+          </tbody>
+        </table>
+        <p class="note">No Boat account. Sign in with GitHub, caps on spend, billed monthly.</p>
+      </div></div>
+    </div>
+    <p class="note" style="margin-top:28px">For reference: a GitHub-hosted 16-core Linux runner is $0.042 a minute. Every machine is deleted when its job ends, so you only pay while jobs run.</p>
+  </section>
+
+  <section class="end" id="access">
+    <p class="eyebrow">Early access</p>
+    <h2 data-scramble>Stop waiting<br>on CI.</h2>
+    <div class="install"><code id="inst2">git clone https://github.com/kkeeland/perseids ~/.perseids</code><button type="button" data-copy="#inst2">COPY</button></div>
+    <p class="note">Then <span style="color:#fff">perseids key</span> and <span style="color:#fff">perseids run</span>. MIT licensed.</p>
+    <div class="heroctas"><a class="btn inv" href="https://github.com/kkeeland/perseids">View on GitHub</a><a class="btn" href="#plugins">Get the plugins</a></div>
+    <div class="bin" id="bin2" aria-hidden="true"></div>
+  </section>
+
+  <footer><span>perseids $ · MIT licensed</span><a href="https://github.com/kkeeland/perseids">github.com/kkeeland/perseids</a></footer>
+</main>
+
+<script>
+(function () {
+  var reduce = matchMedia("(prefers-reduced-motion: reduce)").matches, fine = matchMedia("(pointer: fine)").matches;
+  var JOBS = [["lint", 70, "npm run lint"], ["typecheck", 105, "npx tsc --noEmit"], ["unit", 260, "npm test"], ["integration", 400, "npm run test:int"],
+    ["e2e (1/3)", 350, "playwright --shard=1/3"], ["e2e (2/3)", 365, "playwright --shard=2/3"], ["e2e (3/3)", 335, "playwright --shard=3/3"], ["build", 195, "npm run build"]];
+  var SUM = 2080, MAX = 400;
+  function mmss(s) { s = Math.floor(s); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); }
+  function $(s, r) { return (r || document).querySelector(s); }
+
+  // ---- decode: headings resolve from binary as they arrive ----
+  var GLYPHS = "01▓░/\\<>_$#";
+  function scramble(el) {
+    if (reduce || el.dataset.busy) return; el.dataset.busy = 1;
+    var nodes = [], walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    while (walk.nextNode()) nodes.push({ n: walk.currentNode, t: walk.currentNode.nodeValue });
+    var total = nodes.reduce(function (a, x) { return a + x.t.length; }, 0), start = performance.now(), dur = Math.min(900, 300 + total * 14);
+    (function step(now) {
+      var k = (now - start) / dur, seen = 0;
+      nodes.forEach(function (x) { var out = ""; for (var i = 0; i < x.t.length; i++) { var c = x.t[i], pos = (seen + i) / total;
+          out += c === " " || pos < k ? c : GLYPHS[(Math.random() * GLYPHS.length) | 0]; } x.n.nodeValue = out; seen += x.t.length; });
+      if (k < 1) requestAnimationFrame(step); else { nodes.forEach(function (x) { x.n.nodeValue = x.t; }); delete el.dataset.busy; }
+    })(start);
+  }
+  var sio = new IntersectionObserver(function (es) { es.forEach(function (e) { if (e.isIntersecting) { scramble(e.target); sio.unobserve(e.target); } }); }, { threshold: .6 });
+  document.querySelectorAll("[data-scramble]").forEach(function (h) { sio.observe(h); });
+  document.querySelectorAll(".links a, .heroctas .btn").forEach(function (a) { a.addEventListener("mouseenter", function () { scramble(a); }); });
+
+  // ---- binary columns, like a drive being read ----
+  function bin(el, cols, rows) {
+    if (!el) return;
+    var grid = []; for (var r = 0; r < rows; r++) { var line = []; for (var c = 0; c < cols; c++) line.push(Math.random() < (c < 3 ? .9 : .45 - r * .01) ? (Math.random() < .5 ? "1" : "0") : " "); grid.push(line); }
+    function draw() { el.textContent = grid.map(function (l) { return l.join(""); }).join("\n"); }
+    draw();
+    if (!reduce) setInterval(function () { for (var i = 0; i < 6; i++) { var r = (Math.random() * rows) | 0, c = (Math.random() * cols) | 0; if (grid[r][c] !== " ") grid[r][c] = grid[r][c] === "1" ? "0" : "1"; } draw(); }, 140);
+  }
+  bin($("#bin1"), 7, 9); bin($("#bin2"), 9, 12);
+
+  // ---- hero terminal types itself once ----
+  var ht = $("#heroTerm");
+  if (!reduce && ht) {
+    var html = ht.innerHTML, lines = html.split("\n"); ht.innerHTML = ""; var li = 0;
+    (function next() { if (li >= lines.length) { ht.innerHTML = html; return; } ht.innerHTML = lines.slice(0, ++li).join("\n") + '<span class="caret"></span>'; setTimeout(next, li === 1 ? 650 : 140); })();
+  }
+
+  // ---- windows: minimize, enlarge, close into a folder, drag ----
+  var FOLDER = '<svg viewBox="0 0 58 46" aria-hidden="true"><path d="M2 8h18l5 5h31v31H2z" fill="#000" stroke="#fff" stroke-width="2.5"/><path d="M2 16h54" stroke="#fff" stroke-width="2.5"/><rect x="8" y="2" width="46" height="8" fill="none" stroke="#fff" stroke-width="1.5" stroke-dasharray="1 2"/></svg>';
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest(".ctl button"); if (!b) return;
+    var w = b.closest(".win");
+    if (b.classList.contains("min")) w.classList.toggle("minimized");
+    else if (b.classList.contains("max")) w.classList.toggle("big");
+    else if (b.classList.contains("x") && w.id !== "openWin") {
+      w.classList.add("gone");
+      var f = document.createElement("button"); f.className = "folder"; f.type = "button"; f.innerHTML = FOLDER + "<span></span>"; f.querySelector("span").textContent = w.dataset.name || "window";
+      var host = w.offsetParent || w.parentElement; f.style.left = (w.offsetLeft + w.offsetWidth / 2 - 40) + "px"; f.style.top = (w.offsetTop + 30) + "px";
+      if (getComputedStyle(host).position === "static") host.style.position = "relative";
+      host.appendChild(f);
+      f.addEventListener("click", function () { f.remove(); w.classList.remove("gone"); });
+    }
+  });
+  if (fine) document.querySelectorAll(".drag").forEach(function (w) {
+    var tb = $(".ttl", w), x = 0, y = 0, sx, sy;
+    tb.addEventListener("pointerdown", function (e) { sx = e.clientX - x; sy = e.clientY - y; w.classList.add("dragging"); tb.setPointerCapture(e.pointerId); w.style.transition = "none"; w.style.zIndex = 6; });
+    tb.addEventListener("pointermove", function (e) { if (!w.classList.contains("dragging")) return; x = e.clientX - sx; y = e.clientY - sy; w.style.translate = x + "px " + y + "px"; });
+    tb.addEventListener("pointerup", function () { w.classList.remove("dragging"); w.style.transition = ""; });
+  });
+
+  // ---- marquee of what it runs ----
+  var items = ["services: postgres", "strategy.matrix", "needs:", "if: ${{ }}", "GITHUB_ENV", "GITHUB_OUTPUT", "setup-node", "setup-go", "setup-python", "timeout-minutes", "continue-on-error", "--dirty", "exit 0"];
+  var mq = $("#marq"); mq.innerHTML = items.concat(items).map(function (t) { return "<span>" + t.replace(/</g, "&lt;") + "</span>"; }).join("");
+
+  // ---- the demo ----
+  var list = $("#jobList"), box = $("#machines"), runBtn = $("#run"), verdict = $("#verdict");
+  list.innerHTML = JOBS.map(function (j) { return "<div><span>" + j[0] + "</span><span class='dim'>" + mmss(j[1]) + "</span></div>"; }).join("");
+  var slots = JOBS.map(function (j, i) {
+    var s = document.createElement("div"); s.className = "slot"; s.innerHTML = '<div class="idle">machine ' + (i + 1) + "<br>" + j[0] + "<br>waiting</div>"; box.appendChild(s); return s;
+  });
+  var running = false;
+  function run() {
+    if (running) return; running = true; runBtn.dataset.busy = 1; runBtn.classList.remove("pulse"); runBtn.textContent = "STARTING 8 MACHINES";
+    var rb = runBtn.getBoundingClientRect(), wins = [];
+    slots.forEach(function (s, i) {
+      s.querySelectorAll(".win").forEach(function (o) { o.remove(); });
+      var j = JOBS[i], w = document.createElement("div"); w.className = "win mach";
+      w.innerHTML = '<div class="tb"><div class="ttl"><span>machine-' + (i + 1) + '</span></div></div><div class="body"><div class="dim">' + j[0] + '</div><div>$ git checkout 3f2a91c0</div><div>$ ' + j[2] + '</div><div class="prog">░░░░░░░░░░░░</div><div class="tm">0:00</div><div class="ok-lbl">PASS</div></div>';
+      s.appendChild(w); wins.push(w);
+      if (!reduce) { var r = s.getBoundingClientRect(), dx = rb.left + rb.width / 2 - (r.left + r.width / 2), dy = rb.top + rb.height / 2 - (r.top + r.height / 2);
+        w.animate([{ transform: "translate(" + dx + "px," + dy + "px) scale(.12)", opacity: 0 }, { transform: "none", opacity: 1 }], { duration: 620, delay: i * 45, easing: "cubic-bezier(.2,.9,.2,1.08)", fill: "backwards" }); }
+    });
+    var SPEED = 60, t0 = performance.now() + (reduce ? 0 : 900);
+    function frame(now) {
+      var t = reduce ? MAX : Math.max(0, (now - t0) / 1000 * SPEED);
+      if (now >= t0) runBtn.textContent = t >= MAX ? "RUN AGAIN ▸" : "RUNNING " + mmss(t);
+      wins.forEach(function (w, i) { var d = JOBS[i][1], p = Math.min(1, t / d), n = Math.round(p * 12);
+        $(".prog", w).textContent = "█".repeat(n) + "░".repeat(12 - n); $(".tm", w).textContent = mmss(Math.min(t, d)) + (p >= 1 ? "" : " / " + mmss(d));
+        if (p >= 1 && !w.classList.contains("ok")) w.classList.add("ok"); });
+      $("#usT").textContent = mmss(Math.min(t, MAX)); $("#usF").style.setProperty("--p", Math.min(t, MAX) / SUM);
+      $("#themT").textContent = mmss(Math.min(t, SUM)); $("#themF").style.setProperty("--p", Math.min(t, SUM) / SUM);
+      if (t < MAX) { verdict.textContent = "8 machines running…"; requestAnimationFrame(frame); return; }
+      verdict.innerHTML = "<u>exit 0</u> · all 8 passed in 6m40s.<br>One at a time: 34m40s.";
+      $("#themT").textContent = "34:40"; $("#themF").style.setProperty("--p", 1);
+      setTimeout(function () { wins.forEach(function (w, i) { setTimeout(function () { w.classList.add("deleted"); $(".prog", w).textContent = "machine deleted"; }, reduce ? 0 : i * 70); }); }, reduce ? 0 : 1400);
+      delete runBtn.dataset.busy; running = false;
+    }
+    requestAnimationFrame(frame);
+  }
+  runBtn.addEventListener("click", run);
+
+  // ---- the time chart, to scale ----
+  var seq = $("#seq"), par = $("#par");
+  JOBS.forEach(function (j) {
+    var a = document.createElement("span"); a.style.width = "calc(" + (j[1] / SUM * 100).toFixed(2) + "% - 3px)"; a.title = j[0] + " " + mmss(j[1]); seq.appendChild(a);
+    var b = document.createElement("span"); b.style.width = (j[1] / SUM * 100).toFixed(2) + "%"; b.title = j[0] + " " + mmss(j[1]); par.appendChild(b);
+  });
+  var grown = false;
+  new IntersectionObserver(function (es) {
+    if (grown || reduce || !es[0].isIntersecting) return; grown = true;
+    [].forEach.call(seq.children, function (s, i) { s.animate([{ transform: "scaleX(0)" }, { transform: "scaleX(1)" }], { duration: 420, delay: i * 210, easing: "cubic-bezier(.3,.8,.3,1)", fill: "backwards" }); });
+    [].forEach.call(par.children, function (s) { s.animate([{ transform: "scaleX(0)" }, { transform: "scaleX(1)" }], { duration: 650, delay: 150, easing: "cubic-bezier(.3,.8,.3,1)", fill: "backwards" }); });
+  }, { threshold: .5 }).observe($("#time"));
+
+  // ---- features as folders ----
+  var FILES = [
+    ["exact-commit", "Tests your exact commit", "Runs what's on disk, without a push.", "$ perseids run --dirty\nIncludes uncommitted changes to tracked files.\nThe commit is bundled with its history, so tools that\ncompare against older commits still work."],
+    ["workflow", "Uses your workflow", "Matrix, services, needs, if.", "Reads .github/workflows as GitHub does:\n  strategy.matrix   include and exclude\n  services:         postgres, redis, any image\n  needs:            jobs run in order\n  if: ${{ }}        evaluated per job and step"],
+    ["exit-codes", "One exit code", "0 · 1 · 2 · 99", "0   every job passed\n1   a job failed; the step and log tail are printed\n2   something couldn't run on a machine\n99  a machine failed; run it again"],
+    ["agents", "Agent ready", "Claude Code, Codex, Cursor.", "/plugin install perseids      Claude Code, adds /ci\nnpx skills add perseids       Codex and Cursor\n\nAGENTS.md:\nBefore saying work is done, run `perseids run`."],
+    ["limits", "Spend limits", "Caps per account.", "$ perseids usage\nOctober: 412 of 3,000 machine-minutes\nup to 10 machines at once\n\nRuns past the machine cap wait their turn.\nRuns past the minute cap stop with a clear message."],
+    ["cleanup", "Nothing left running", "Deleted on exit and on crash.", "Every machine is deleted when its job ends,\non Ctrl-C, and when the CLI crashes.\nEach machine also stops itself after PERSEIDS_TTL."]
+  ];
+  var FOLD = '<svg viewBox="0 0 76 60" aria-hidden="true"><rect x="10" y="2" width="62" height="50" fill="none" stroke="#fff" stroke-width="1.5" stroke-dasharray="1 2.5"/><path d="M3 10h22l6 6h40v40H3z" fill="#000" stroke="#fff" stroke-width="3"/><path d="M3 20h68" stroke="#fff" stroke-width="3"/></svg>';
+  var files = $("#files"), openWin = $("#openWin");
+  FILES.forEach(function (f) {
+    var b = document.createElement("button"); b.type = "button"; b.className = "file"; b.setAttribute("aria-expanded", "false"); b.setAttribute("aria-controls", "openWin");
+    b.innerHTML = FOLD + "<b>" + f[0] + "</b><small>" + f[1] + ". " + f[2] + "</small>"; files.appendChild(b);
+    b.addEventListener("click", function () {
+      var already = b.getAttribute("aria-expanded") === "true";
+      files.querySelectorAll(".file").forEach(function (x) { x.setAttribute("aria-expanded", "false"); });
+      if (already) { openWin.hidden = true; return; }
+      b.setAttribute("aria-expanded", "true"); $("#openTtl").textContent = f[0] + ".txt"; $("#openBody").textContent = f[3]; openWin.hidden = false;
+      if (!reduce) { var r = b.getBoundingClientRect(), o = openWin.getBoundingClientRect();
+        openWin.animate([{ transform: "translate(" + (r.left - o.left) + "px," + (r.top - o.top) + "px) scale(.15)", transformOrigin: "top left", opacity: .2 }, { transform: "none", transformOrigin: "top left", opacity: 1 }], { duration: 480, easing: "cubic-bezier(.2,.9,.2,1.05)" }); }
+    });
+  });
+  $("#openClose").addEventListener("click", function () { openWin.hidden = true; files.querySelectorAll(".file").forEach(function (x) { x.setAttribute("aria-expanded", "false"); }); });
+
+  // ---- docs tabs ----
+  var tabs = document.querySelectorAll("[role=tab]");
+  tabs.forEach(function (t) { t.addEventListener("click", function () {
+    tabs.forEach(function (x) { x.setAttribute("aria-selected", x === t ? "true" : "false"); document.getElementById(x.getAttribute("aria-controls")).hidden = x !== t; });
+  }); });
+
+  // ---- copy ----
+  document.querySelectorAll("[data-copy]").forEach(function (b) { b.addEventListener("click", function () {
+    var el = $(b.dataset.copy), txt = el.textContent;
+    function ok() { b.textContent = "COPIED"; setTimeout(function () { b.textContent = "COPY"; }, 1500); }
+    function sel() { var r = document.createRange(); r.selectNodeContents(el); var s = getSelection(); s.removeAllRanges(); s.addRange(r); b.textContent = "SELECTED"; setTimeout(function () { b.textContent = "COPY"; }, 1500); }
+    try { navigator.clipboard.writeText(txt).then(ok, sel); } catch (e) { sel(); }
+  }); });
+
+  // ---- every click leaves a halftone ring; a square follows the pointer ----
+  if (!reduce) addEventListener("pointerdown", function (e) { var d = document.createElement("div"); d.className = "burst"; d.style.left = e.clientX + "px"; d.style.top = e.clientY + "px"; document.body.appendChild(d); setTimeout(function () { d.remove(); }, 650); });
+  var cur = $("#cur");
+  if (fine && !reduce) {
+    var cx = -100, cy = -100, tx = -100, ty = -100;
+    addEventListener("pointermove", function (e) { tx = e.clientX; ty = e.clientY; cur.classList.toggle("on", !!e.target.closest("a,button,.ttl")); }, { passive: true });
+    (function loop() { cx += (tx - cx) * .22; cy += (ty - cy) * .22; cur.style.transform = "translate(" + cx + "px," + cy + "px)"; requestAnimationFrame(loop); })();
+  } else cur.remove();
+})();
+</script>

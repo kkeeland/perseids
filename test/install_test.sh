@@ -18,7 +18,7 @@ HOME=$t/home "$t/home/.local/bin/perseids" help | grep -q 'perseids run' || fail
 run "$PATH" > "$t/out" || fail "second run (update) failed: $(cat "$t/out")"
 
 mkdir "$t/nojq"
-for c in git curl ssh ruby uname sed; do ln -s "$(command -v "$c")" "$t/nojq/$c"; done
+for c in git curl ssh ruby uname sed apt-get; do p=$(command -v "$c") || continue; ln -s "$p" "$t/nojq/$c"; done
 if run "$t/nojq" > "$t/out"; then fail "succeeded without jq"; fi
 grep -q 'install.*jq' "$t/out" || fail "no install command for jq: $(cat "$t/out")"
 

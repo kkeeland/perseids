@@ -9,6 +9,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: ruby test/runner_test.rb
+      - run: ruby test/bisect_test.rb
       - run: bash -n bin/perseids
 
   services:

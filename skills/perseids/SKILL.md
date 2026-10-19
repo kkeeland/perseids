@@ -20,6 +20,9 @@ perseids run --dirty              # test uncommitted tracked changes (new untrac
 PERSEIDS_EVENT=workflow_dispatch perseids run   # jobs see this event, so steps gated on it run too (default push)
 ```
 
+When something that used to pass now fails and you don't know which commit broke it, run `perseids bisect '<command>'`
+(add `--good <ref>` if you know a passing commit): it tests every commit at once and names the first bad one, exit 0.
+
 If `perseids` isn't on PATH, run `bin/perseids` from this skill's plugin folder (two levels up from this file).
 
 ## Read the result

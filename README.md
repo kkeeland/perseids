@@ -54,6 +54,20 @@ perseids run --dirty         # include uncommitted changes
 perseids exec 'npm test'     # one command on one machine
 ```
 
+## Find the commit that broke it
+
+`git bisect` tests one commit at a time, about five rounds in a row. `perseids bisect` tests every commit in the range
+at once, one machine each, and names the first bad commit in the time of one run.
+
+```bash
+perseids bisect 'npm test'                  # HEAD against where it left main (or the last 30 commits)
+perseids bisect 'make test' --good v1.4.0   # your own range; --bad defaults to HEAD
+```
+
+It prints each commit with pass or fail, then the first bad one: its SHA, subject and author. If the range is longer
+than `-n` (default 30), it tests an even spread first, then narrows. It tells you when the results don't line up, such
+as a flaky test that passes after a failure.
+
 ## What you get
 
 <table>
@@ -135,6 +149,7 @@ spend. It's in early access.
 
 ```bash
 ruby test/runner_test.rb     # the runner, on your machine
+ruby test/bisect_test.rb     # bisect's logic, on your machine
 perseids run                 # this repo's own CI, on machines
 ```
 

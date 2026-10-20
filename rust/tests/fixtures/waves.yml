@@ -1,0 +1,25 @@
+env:
+  STAGE: prod
+  TAG: "v-${{ env.STAGE }}"
+jobs:
+  lint: { runs-on: ubuntu-latest, steps: [] }
+  build: { needs: lint, runs-on: ubuntu-latest, steps: [] }
+  test:
+    needs: [build, lint]
+    runs-on: ${{ matrix.os }}
+    strategy: { matrix: { os: [ubuntu-latest, macos-14, windows-2022] } }
+  deploy:
+    needs: [test]
+    if: github.event_name == 'release' || env.TAG == 'V-PROD'
+    runs-on: ubuntu-latest
+  manual: { if: "${{ github.event_name == 'workflow_dispatch' }}", runs-on: ubuntu-latest }
+  never: { if: false, runs-on: ubuntu-latest }
+  always: { needs: deploy, if: "${{ always() }}", runs-on: ubuntu-latest }
+  reusable: { uses: ./.github/workflows/other.yml }
+  boxed: { runs-on: ubuntu-latest, container: "node:22" }
+  labels: { runs-on: { group: big, labels: [self-hosted, macOS] } }
+  fmt:
+    runs-on: "${{ format('{0}-latest', 'ubuntu') }}"
+    if: startsWith(github.ref, 'refs/heads/') && contains(fromJSON('["main","dev"]'), github.ref_name)
+  bad-if: { runs-on: ubuntu-latest, if: "github.event.commits.*.id" }
+  nope: { runs-on: ubuntu-latest, if: "nope()" }

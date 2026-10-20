@@ -12,7 +12,7 @@ matrix entry, all at once. Each box tests the exact commit, then is deleted. A f
 
 ```bash
 perseids run                      # every job, waves in needs: order
-perseids run test lint            # just these jobs (needs: ignored), each matrix entry on its own box
+perseids run test lint            # these jobs and the jobs they need, each matrix entry on its own box
 perseids run -w e2e.yml           # another workflow
 perseids run --keep-going         # don't stop at a job's first failing step; see every failure in one run
 perseids exec 'npm ci && npm test -- src/foo'   # any command on one box: the quick loop while you fix one thing
@@ -33,8 +33,8 @@ The exit code is the verdict:
 | Exit | Means | What to do |
 |---|---|---|
 | 0 | every job passed | the commit is green |
-| 1 | a job failed | the summary prints the failing step and the log's last lines; fix it and rerun **only that job** (`perseids run <job>`) |
-| 2 | incomplete | a step or job it can't run on a box was skipped (macOS/Windows, a container job, an unsupported action, a secret). The summary marks it SKIPPED or unsupported. Say so and don't call it green. |
+| 1 | a job failed | the summary prints the failing step and the log's last lines; fix it and rerun **only that job** (`perseids run <job>`; the jobs it needs run with it) |
+| 2 | incomplete | a step or job it can't run on a box was skipped (macOS/Windows, a container job, an unsupported action, an `if:` that reads secrets or vars). The summary marks it SKIPPED or unsupported. Say so and don't call it green. |
 | 99 | a box failed (Boat, SSH, the image) | not your code: rerun once; if it repeats, report the error line |
 
 Each job's full log is in the folder the summary names (`~/.local/state/perseids/logs/...`). To find the failure, grep it for `=== ` (step headers) and `FAIL`.

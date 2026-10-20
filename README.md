@@ -190,11 +190,6 @@ reported as skipped and the run exits `2`. Secrets are never sent to machines.
 Need a database server, browsers or a pinned toolchain? Put the setup in `.perseids/setup.sh`, run
 `perseids image build` once, and commit the `.perseids/image` file it writes.
 
-## Perseids Cloud
-
-Don't want a Boat account? Perseids Cloud runs the machines for you: sign in with GitHub, pay per minute, with caps on
-spend. It's in early access.
-
 ## Development
 
 ```bash

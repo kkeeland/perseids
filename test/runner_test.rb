@@ -1,6 +1,7 @@
 # ruby test/runner_test.rb — the runner's logic, on your machine (no box, no Docker).
 require "minitest/autorun"
 require "tmpdir"
+require "fileutils"
 require "yaml"
 require_relative "../lib/runner"
 
@@ -63,6 +64,41 @@ class RunnerTest < Minitest::Test
                   [2, "deploy", 0, "skip", "test"]], rows.map { |r| r[0, 5] }
     assert_equal "test (macos-14)", rows[2][5]
     assert_equal [[0, "test", 0, "run", ""]], Perseids.plan(wf, ["test"]).first(1).map { |r| r[0, 5] }
+  end
+
+  def test_composite_action
+    Dir.mktmpdir do |d|
+      FileUtils.mkdir_p("#{d}/.github/actions/greet")
+      File.write("#{d}/.github/actions/greet/action.yml", <<~'Y')
+        inputs:
+          who: { default: world }
+          loud: { default: "no" }
+        runs:
+          using: composite
+          steps:
+            - run: echo "hello ${{ inputs.who }}" > out.txt
+              shell: bash
+            - run: test "${{ inputs.loud }}" = "no"
+              shell: bash
+      Y
+      File.write("#{d}/wf.yml", <<~'Y')
+        jobs:
+          j:
+            runs-on: ubuntu-latest
+            steps:
+              - uses: ./.github/actions/greet
+                with: { who: perseids }
+              - run: grep -q "hello perseids" out.txt
+              - uses: ./.github/actions/greet
+                with: { loud: "yes" }
+              - run: echo never
+      Y
+      out = Dir.chdir(d) { IO.popen(["ruby", File.expand_path("../lib/runner.rb", __dir__), "run", "wf.yml", "j"], err: %i[child out], &:read) }
+      assert_equal 1, $?.exitstatus, out
+      assert_match(/greet.*ok \(composite\)/, out)
+      assert_match(/\[ ?\d\] grep -q "hello perseids" out.txt\s+ok/, out)
+      assert_match(/skipped \(an earlier step failed\)/, out)
+    end
   end
 
   def test_run_a_job

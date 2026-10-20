@@ -20,7 +20,7 @@ self=${GITHUB_WORKFLOW_REF#*/*/}; self=${self%@*}
 args=(run -w "$wf")
 [ -n "$INPUT_JOBS" ] && read -ra jobs <<<"$INPUT_JOBS" && args+=("${jobs[@]}")
 [ "$INPUT_KEEP_GOING" = true ] && args+=(--keep-going)
-export PERSEIDS_EVENT=${GITHUB_EVENT_NAME:-push} PERSEIDS_CLOUD=0
+export PERSEIDS_EVENT=${GITHUB_EVENT_NAME:-push}
 log=$(mktemp)
 "$GITHUB_ACTION_PATH/bin/perseids" "${args[@]}" 2>&1 | tee "$log"
 rc=${PIPESTATUS[0]}

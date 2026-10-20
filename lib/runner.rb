@@ -485,6 +485,7 @@ module Perseids
     end
 
     def uses(step, sctx, name, i)
+      return composite(step, sctx, name, i) if step["uses"].start_with?("./")
       action, ref = step["uses"].split("@", 2)
       action = action.downcase
       return [true, "ok (nothing to do on a fresh box)"] if NOOP.include?(action)
@@ -508,6 +509,28 @@ module Perseids
       ok = mise_install("#{tool}@#{ver}")
       ok &&= spawn_wait(@env, %w[bundle install --jobs 4], with["working-directory"] || Dir.pwd, nil) if tool == "ruby" && Expr.truthy(with["bundler-cache"])
       [ok, ok ? "ok #{tool}@#{ver}" : nil]
+    end
+
+    # A local composite action (uses: ./path): its steps run here, in order, with its inputs.
+    def composite(step, sctx, name, i)
+      dir = step["uses"].chomp("/")
+      file = %w[action.yml action.yaml].map { |f| File.join(dir, f) }.find { |f| File.exist?(f) }
+      raise Unsupported, "no action.yml in #{dir}" unless file
+      runs = Perseids.load(file)["runs"] || {}
+      raise Unsupported, "#{dir} is a #{runs["using"]} action, not composite" unless runs["using"] == "composite"
+      with = step["with"] || {}
+      defs = Perseids.load(file)["inputs"] || {}
+      inputs = defs.map { |k, d| [k, Expr.str(Perseids.interpolate(with.key?(k) ? with[k] : (d || {})["default"], sctx))] }.to_h
+      log "\n=== [#{i}] #{name} (composite, #{(runs["steps"] || []).size} steps)"
+      saved, before = @ctx["inputs"], @failed
+      begin
+        @ctx["inputs"], @failed = inputs, false # inside the action, success() means its own steps so far
+        (runs["steps"] || []).each_with_index { |cs, j| run_step(cs, "#{i}.#{j}") }
+        ok = !@failed
+      ensure
+        @ctx["inputs"], @failed = saved, before
+      end
+      [ok, ok ? "ok (composite)" : nil]
     end
 
     def default_version_file(tool)

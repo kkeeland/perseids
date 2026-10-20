@@ -28,7 +28,6 @@ sends its log back, and is deleted on every way out. No GitHub Actions minutes a
   perseids image build [-C dir]                                          # bake .perseids/setup.sh into an image
   perseids ls                                                            # this account's perseids boxes
   perseids reap [--all]                                                  # delete orphaned (or all) boxes from here
-  perseids login | usage                                                 # hosted mode: sign in with GitHub | this month's use
 
 Exit: 0 passed, 1 failed, 2 incomplete (something it can't run on a box was skipped), 99 a box itself failed.
 Settings (environment):
@@ -39,8 +38,6 @@ Settings (environment):
   PERSEIDS_TTL    seconds before a box stops itself, the safety net (default 7200)
   PERSEIDS_TAIL   log lines to print for each failed job (default 40)
   PERSEIDS_EVENT  the github.event_name jobs see (default push; workflow_dispatch runs manual-only steps)
-  PERSEIDS_CLOUD  1: hosted mode, no Boat account needed (on by itself after `perseids login`; 0 turns it off).
-    PERSEIDS_CLOUD_URL is the server, PERSEIDS_TOKEN or ~/.config/perseids/cloud.env the sign-in.
 ";
 
 // --- process-wide state, so a signal or a die anywhere still deletes every box ---
@@ -666,17 +663,10 @@ fn main() {
         finish(0)
     }
 
-    let cloud_file = env("PERSEIDS_CLOUD_FILE").unwrap_or_else(|| format!("{}/.config/perseids/cloud.env", home()));
-    let cloud = match env("PERSEIDS_CLOUD") {
-        Some(c) => c != "0",
-        None => Path::new(&cloud_file).is_file(),
-    };
-    // ponytail: no public server yet; set PERSEIDS_CLOUD_URL once one is deployed
-    let cloud_url = env("PERSEIDS_CLOUD_URL").or_else(|| env_file(&cloud_file, "PERSEIDS_CLOUD_URL").filter(|u| !u.is_empty())).unwrap_or_else(|| "http://127.0.0.1:8787".into());
     let boat = env("BOAT_API").unwrap_or_else(|| "https://boat.dev/api/v1".into());
     let key_file = env("PERSEIDS_KEY_FILE").unwrap_or_else(|| format!("{}/.config/perseids/boat.env", home()));
     let ty = env("PERSEIDS_TYPE").unwrap_or_else(|| "large".into());
-    let mut max: usize = env("PERSEIDS_MAX").map_or(Ok(10), |m| m.parse()).unwrap_or_else(|_| die("PERSEIDS_MAX must be a number"));
+    let max: usize = env("PERSEIDS_MAX").map_or(Ok(10), |m| m.parse()).unwrap_or_else(|_| die("PERSEIDS_MAX must be a number"));
     let ttl: u64 = env("PERSEIDS_TTL").map_or(Ok(7200), |m| m.parse()).unwrap_or_else(|_| die("PERSEIDS_TTL must be a number"));
     let host = hostname();
     let pid = std::process::id();
@@ -684,66 +674,23 @@ fn main() {
     fs::create_dir_all(&work).unwrap_or_else(|e| die(format!("no temp folder: {e}")));
     let _ = WORK.set(work.clone());
 
-    let key = |cloud: bool| {
-        let (base, k) = if cloud {
-            // hosted mode: our sign-in token, never a Boat key
-            let t = env("PERSEIDS_TOKEN").or_else(|| env_file(&cloud_file, "PERSEIDS_TOKEN")).unwrap_or_default();
-            if t.is_empty() {
-                die("not signed in: run perseids login (or set PERSEIDS_TOKEN)");
-            }
-            (format!("{cloud_url}/api/v1"), t)
-        } else {
-            let k = env("BOAT_API_KEY").or_else(|| env_file(&key_file, "BOAT_API_KEY").map(|k| k.replace(['"', '\'', ' '], ""))).unwrap_or_default();
-            if k.is_empty() {
-                die("no Boat key: run perseids key (or set BOAT_API_KEY)");
-            }
-            (boat.clone(), k)
-        };
-        let _ = API.set((base, k));
+    let key = || {
+        let k = env("BOAT_API_KEY").or_else(|| env_file(&key_file, "BOAT_API_KEY").map(|k| k.replace(['"', '\'', ' '], ""))).unwrap_or_default();
+        if k.is_empty() {
+            die("no Boat key: run perseids key (or set BOAT_API_KEY)");
+        }
+        let _ = API.set((boat.clone(), k));
     };
 
     match cmd.as_str() {
         "help" | "-h" | "--help" => usage(0),
-        "login" => {
-            // GitHub device flow through the hosted server; it keeps only your GitHub id and login
-            let r = j(&request("POST", &format!("{cloud_url}/auth/device"), None, &[]).unwrap_or_else(|e| die(e)));
-            let dc = js(&r["device_code"]);
-            if dc.is_empty() {
-                die(format!("sign-in didn't start: {}", [js(&r["message"]), js(&r["error"]), r.to_string()].into_iter().find(|m| !m.is_empty()).unwrap()));
-            }
-            say(format!("open {} and enter {}", js(&r["verification_uri"]), js(&r["user_code"])));
-            let mut wait = r["interval"].as_u64().unwrap_or(5);
-            let body = json!({ "device_code": dc }).to_string();
-            let r = loop {
-                secs(wait);
-                let r = j(&request("POST", &format!("{cloud_url}/auth/token"), Some(&body), &[("Content-Type", "application/json")]).unwrap_or_else(|e| die(e)));
-                match js(&r["error"]).as_str() {
-                    "authorization_pending" => {}
-                    "slow_down" => wait += 5,
-                    "" => break r,
-                    e => die(format!("sign-in failed: {e}")),
-                }
-            };
-            write_secret(&cloud_file, &format!("PERSEIDS_CLOUD_URL={cloud_url}\nPERSEIDS_TOKEN={}\n", js(&r["token"]))).unwrap_or_else(|e| die(e));
-            say(format!("signed in as {}; hosted mode is on (PERSEIDS_CLOUD=0 turns it off)", js(&r["login"])));
-            finish(0)
-        }
-        "usage" => {
-            key(true);
-            let r = api("GET", "/me", None, None).unwrap_or_else(|e| die(e));
-            match serde_json::from_str::<J>(&r) {
-                Ok(v) => println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default()),
-                Err(_) => die(format!("the hosted server at {cloud_url} didn't answer: {}", chars(&r, 300))),
-            }
-            finish(0)
-        }
         "key" => {
             // the one place your Boat key lives: ~/.config/perseids/boat.env, mode 600
             let k = read_key();
             if !k.starts_with("boat_") {
                 die("that isn't a Boat key: they start with boat_");
             }
-            let _ = API.set((boat.clone(), k.clone())); // checked against Boat itself, even when signed in to the hosted service
+            let _ = API.set((boat.clone(), k.clone())); // checked against Boat itself
             let ok = api("GET", "/sandboxes?limit=1", None, None).map(|r| j(&r).get("sandboxes").is_some());
             if ok != Ok(true) {
                 die("Boat didn't accept that key");
@@ -753,36 +700,23 @@ fn main() {
             finish(0)
         }
         "ls" => {
-            key(cloud);
+            key();
             for (id, st, name) in boxes().unwrap_or_else(|e| die(e)) {
                 println!("{id} {st} {name}");
             }
             finish(0)
         }
         "reap" => {
-            key(cloud);
+            key();
             reap(all).unwrap_or_else(|e| die(e));
             finish(0)
         }
-        "run" | "exec" | "image" => key(cloud),
+        "run" | "exec" | "image" => key(),
         _ => {
             say(format!("unknown command {cmd}"));
             usage(64)
         }
     }
-    if cloud {
-        if cmd == "image" {
-            die("image build isn't in hosted mode yet");
-        }
-        // never ask for more boxes at once than this account may hold
-        let cap = api("GET", "/me", None, None).ok().and_then(|r| {
-            let c = j(&r)["boxCap"].clone();
-            c.as_u64().map(|n| n as usize).or_else(|| c.as_str().and_then(|s| s.parse().ok()))
-        });
-        let Some(cap) = cap else { die(format!("the hosted server at {cloud_url} didn't answer or the sign-in is stale (perseids login)")) };
-        max = max.min(cap);
-    }
-
     if cmd == "image" {
         image_build(&args, &dir, &work, &ty, ttl, &host);
     }

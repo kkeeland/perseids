@@ -277,8 +277,8 @@ footer { border-top: 1px solid var(--g2); padding-block: 26px calc(26px + env(sa
   <div class="navin">
     <a class="logo" href="#top"><span class="lb">perseids</span><span class="pr caret">$</span></a>
     <div class="links">
-      <a class="wide" href="#demo">Demo</a><a class="wide" href="#plugins">Plugins</a><a class="wide" href="#docs">Docs</a><a class="wide" href="#pricing">Pricing</a><a href="https://github.com/kkeeland/perseids">GitHub</a>
-      <a class="btn inv" href="#access">Get access</a>
+      <a class="wide" href="#demo">Demo</a><a class="wide" href="#plugins">Plugins</a><a class="wide" href="#docs">Docs</a><a class="wide" href="#cost">Cost</a><a href="https://github.com/kkeeland/perseids">GitHub</a>
+      <a class="btn inv" href="#access">Install</a>
     </div>
   </div>
 </nav>
@@ -539,38 +539,39 @@ acme-web@3f2a91c0 · 4 jobs on 4 machines
     </div>
   </section>
 
-  <section style="padding-top:0" id="pricing">
-    <p class="eyebrow">Pricing</p>
-    <h2 data-scramble>Pay Boat directly, or let us run it.</h2>
+  <section style="padding-top:0" id="cost">
+    <p class="eyebrow">Cost</p>
+    <h2 data-scramble>Boat's price. Nothing added.</h2>
     <div class="price">
-      <div class="win stack"><div class="tb"><div class="ttl"><span>open-source.txt</span></div></div><div class="body">
+      <div class="win stack"><div class="tb"><div class="ttl"><span>per-minute.txt</span></div></div><div class="body">
         <table class="ptable">
-          <caption>Open source · your Boat account</caption>
-          <thead><tr><th>Machine</th><th>Size</th><th class="r">Per minute</th></tr></thead>
+          <caption>One minute of a 16 vCPU Linux machine</caption>
+          <thead><tr><th>Where</th><th>Billing</th><th class="r">Per minute</th></tr></thead>
           <tbody>
-            <tr><td>large</td><td class="dim">8 vCPU · 16 GB</td><td class="r big">$0.0012</td></tr>
-            <tr><td>xlarge</td><td class="dim">16 vCPU</td><td class="r big">$0.0033</td></tr>
+            <tr><td>Perseids on Boat</td><td class="dim">your Boat account</td><td class="r big">$0.0033</td></tr>
+            <tr><td>GitHub-hosted</td><td class="dim">16-core runner</td><td class="r big">$0.042</td></tr>
+            <tr><td>Depot CI</td><td class="dim">16 CPU sandbox</td><td class="r big">$0.048</td></tr>
           </tbody>
         </table>
-        <p class="note">Boat's list price. Perseids adds nothing.</p>
+        <p class="note">List prices, October 2026. Boat's 8 vCPU box, the default, is $0.0012 a minute.</p>
       </div></div>
-      <div class="win stack"><div class="tb"><div class="ttl"><span>cloud.txt</span></div></div><div class="body">
+      <div class="win stack"><div class="tb"><div class="ttl"><span>benchmark.txt</span></div></div><div class="body">
         <table class="ptable">
-          <caption>Perseids Cloud · early access</caption>
-          <thead><tr><th>Machine</th><th>Size</th><th class="r">Per minute</th></tr></thead>
+          <caption>pretix's real CI, same commit, 6 jobs</caption>
+          <thead><tr><th>Where</th><th>Machines</th><th class="r">Wall time</th></tr></thead>
           <tbody>
-            <tr><td>large</td><td class="dim">8 vCPU · 16 GB</td><td class="r big">$0.0048</td></tr>
-            <tr><td>xlarge</td><td class="dim">16 vCPU</td><td class="r big">$0.0133</td></tr>
+            <tr><td>GitHub-hosted</td><td class="dim">standard runners</td><td class="r big">25:18</td></tr>
+            <tr><td>Perseids on Boat</td><td class="dim">8 vCPU boxes</td><td class="r big">15:26</td></tr>
           </tbody>
         </table>
-        <p class="note">No Boat account. Sign in with GitHub, caps on spend, billed monthly.</p>
+        <p class="note">About $0.08 a run. Best of 3 runs; the slowest was 22:11. Method and every run: <a href="https://github.com/kkeeland/perseids/blob/main/docs/benchmark.md">docs/benchmark.md</a>.</p>
       </div></div>
     </div>
-    <p class="note" style="margin-top:28px">For reference: a GitHub-hosted 16-core Linux runner is $0.042 a minute. Every machine is deleted when its job ends, so you only pay while jobs run.</p>
+    <p class="note" style="margin-top:28px">Perseids is free and MIT licensed. You pay Boat directly, and only while jobs run: every machine is deleted when its job ends.</p>
   </section>
 
   <section class="end" id="access">
-    <p class="eyebrow">Early access</p>
+    <p class="eyebrow">Get started</p>
     <h2 data-scramble>Stop waiting<br>on CI.</h2>
     <div class="install"><code id="inst2">curl -fsSL https://raw.githubusercontent.com/kkeeland/perseids/main/install.sh | sh</code><button type="button" data-copy="#inst2">COPY</button></div>
     <p class="note">Then <span style="color:#fff">perseids key</span> and <span style="color:#fff">perseids run</span>. MIT licensed.</p>

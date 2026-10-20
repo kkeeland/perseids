@@ -24,14 +24,27 @@ Your CI takes as long as its **slowest** job, not all of them added up. Perseids
 starts one [Boat](https://boat.dev) machine per job and matrix entry in your own account, runs them in parallel, and
 deletes every machine when it's done.
 
+## Before you start
+
+You need a [Boat](https://boat.dev) account and API key. Large machines (the default) need Boat's $20 plan, and
+xlarge machines its $100 plan.
+
 ## Install
 
 ```bash
-git clone https://github.com/kkeeland/perseids ~/.perseids
-ln -s ~/.perseids/bin/perseids /usr/local/bin/perseids
+curl -fsSL https://raw.githubusercontent.com/kkeeland/perseids/main/install.sh | sh
 ```
 
-Needs `bash`, `git`, `jq`, `curl`, `ssh` and Ruby 2.6+. macOS has all of them except `jq` (`brew install jq`).
+It clones Perseids into `~/.perseids`, links the command into `~/.local/bin` (no sudo), and tells you the exact command
+for anything missing. Needs `bash`, `git`, `jq`, `curl`, `ssh` and Ruby 2.6+. macOS has all of them except `jq`
+(`brew install jq`). Run it again to update.
+
+Or by hand:
+
+```bash
+git clone https://github.com/kkeeland/perseids ~/.perseids
+mkdir -p ~/.local/bin && ln -s ~/.perseids/bin/perseids ~/.local/bin/perseids
+```
 
 ## Add your Boat key
 
@@ -135,6 +148,7 @@ spend. It's in early access.
 
 ```bash
 ruby test/runner_test.rb     # the runner, on your machine
+sh test/install_test.sh      # install.sh, in a throwaway HOME
 perseids run                 # this repo's own CI, on machines
 ```
 

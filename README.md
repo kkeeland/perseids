@@ -24,6 +24,8 @@ Your CI takes as long as its **slowest** job, not all of them added up. Perseids
 starts one [Boat](https://boat.dev) machine per job and matrix entry in your own account, runs them in parallel, and
 deletes every machine when it's done.
 
+[Benchmark](docs/benchmark.md): pretix's real CI took 15m26s to 22m11s on Perseids, against 25m18s on GitHub, for the same commit.
+
 ## Before you start
 
 You need a [Boat](https://boat.dev) account and API key. Large machines (the default) need Boat's $20 plan, and

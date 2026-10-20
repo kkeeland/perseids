@@ -1,4 +1,7 @@
-# perseids (Rust)
+# perseids (Rust, experimental)
+
+**Experimental.** `bin/perseids` (bash) is the supported CLI. This port has `run`, `exec`, `key`, `ls`, `reap` and
+`image build`, but not `bisect` or `--split` yet, and its Linux builds are untested.
 
 The Rust port of `bin/perseids`, built as a single binary with no Ruby, jq or curl needed on your machine. It plans the workflow
 itself (`src/plan.rs`, kept identical to `lib/runner.rb plan` by `tests/parity.rs`). It embeds `lib/runner.rb`,

@@ -67,6 +67,18 @@ perseids run --dirty         # include uncommitted changes
 perseids exec 'npm test'     # one command on one machine
 ```
 
+## Split one slow suite across machines
+
+```bash
+perseids exec --split 8 'npx playwright test --shard={i}/{n}'
+perseids exec --split 8 --files 'test/**/*_test.rb' 'ruby -Itest -e "ARGV.each { |f| require \"./#{f}\" }" {files}'
+```
+
+`{i}` and `{n}` become each machine's shard number and the count, for tools that shard on their own (`jest --shard`,
+`pytest --splits {n} --group {i}`). With `--files`, the files in that commit that match the glob are split into groups
+balanced by file size, the same way every time, and `{files}` becomes one machine's group, quoted (it's added at the
+end if the command doesn't have it). The summary shows each shard's time, and the run fails if any shard fails.
+
 ## What you get
 
 <table>

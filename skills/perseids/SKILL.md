@@ -18,6 +18,7 @@ perseids run --keep-going         # don't stop at a job's first failing step; se
 perseids exec 'npm ci && npm test -- src/foo'   # any command on one box: the quick loop while you fix one thing
 perseids run --dirty              # test uncommitted tracked changes (new untracked files aren't included)
 PERSEIDS_EVENT=workflow_dispatch perseids run   # jobs see this event, so steps gated on it run too (default push)
+perseids exec --split 8 --files 'test/**/*_test.rb' '<runner> {files}'   # a suite that takes minutes: split it over 8 boxes ({i}/{n} for tools with --shard)
 ```
 
 When something that used to pass now fails and you don't know which commit broke it, run `perseids bisect '<command>'`

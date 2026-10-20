@@ -1,6 +1,6 @@
 {
   "name": "perseids",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Run your GitHub Actions CI on fresh cloud machines, every job at once, against your exact local commit. Adds /ci.",
   "author": {
     "name": "kkeeland"

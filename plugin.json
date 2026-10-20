@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "perseids",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Run your GitHub Actions CI on fresh cloud machines, every job at once, against your exact local commit. One exit code back.",
   "author": { "name": "kkeeland", "url": "https://github.com/kkeeland" },
   "homepage": "https://github.com/kkeeland/perseids",

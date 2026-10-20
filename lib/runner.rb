@@ -2,11 +2,13 @@
 # perseids runner: reads a GitHub Actions workflow and either plans its jobs (on your machine) or runs one job's
 # steps (on the box, inside the checkout). Ruby 2.6+, stdlib only.
 #
-#   ruby runner.rb plan <workflow.yml> [job...]      # TSV: wave job index state needs label note ("-" if empty)
-#   ruby runner.rb run  <workflow.yml> <job> [index] # run one job (one matrix entry) in the current directory
+#   ruby runner.rb plan   <workflow.yml> [job...]              # TSV: wave job index state needs label note ("-" if empty)
+#   ruby runner.rb decide <workflow.yml> <job> <index> <work>  # once its needs finish: "run", or "skip|unsupported <why>"
+#   ruby runner.rb run    <workflow.yml> <job> [index]         # run one job (one matrix entry) in the current directory
 #
 # run exits 0 passed, 1 failed, 2 incomplete (a step it can't run here was skipped: SKIPPED in the summary).
-# The last line is "PERSEIDS_RESULT <pass|fail|incomplete>\t<failed step>" for the CLI.
+# The last line is "PERSEIDS_RESULT <pass|fail|incomplete>\t<failed step>" for the CLI; the line before it,
+# "PERSEIDS_OUTPUTS <json>", carries the job's outputs: to the jobs that need it.
 require "yaml"
 require "json"
 require "tmpdir"
@@ -18,9 +20,14 @@ module Perseids
 
   # The ${{ }} subset CI files actually use: contexts, literals, == != < > && || !, and the common functions.
   class Expr
-    def initialize(ctx, failed = false)
+    attr_reader :reads # the contexts the value depended on: a short-circuited side doesn't count
+
+    # success() and failure() aren't opposites for a job: when a job it needs was skipped, both are false.
+    def initialize(ctx, failed = false, success = !failed)
       @ctx = ctx
       @failed = failed
+      @success = success
+      @reads = []
     end
 
     def eval(src)
@@ -76,7 +83,7 @@ module Perseids
       v = parse_and
       while peek("||")
         take
-        r = parse_and
+        r = quietly(Expr.truthy(v)) { parse_and }
         v = Expr.truthy(v) ? v : r
       end
       v
@@ -86,10 +93,19 @@ module Perseids
       v = parse_cmp
       while peek("&&")
         take
-        r = parse_cmp
+        r = quietly(!Expr.truthy(v)) { parse_cmp }
         v = Expr.truthy(v) ? r : v
       end
       v
+    end
+
+    # Parses a side whose value won't be used without counting what it reads.
+    def quietly(unused)
+      was = @quiet
+      @quiet ||= unused
+      yield
+    ensure
+      @quiet = was
     end
 
     def parse_cmp
@@ -139,7 +155,9 @@ module Perseids
       when "true" then true
       when "false" then false
       when "null" then nil
-      else index(@ctx, val)
+      else
+        @reads << val.downcase unless @quiet
+        index(@ctx, val)
       end
     end
 
@@ -153,7 +171,7 @@ module Perseids
       take(")")
       case name.downcase
       when "always" then true
-      when "success" then !@failed
+      when "success" then @success
       when "failure" then @failed
       when "cancelled" then false
       when "contains"
@@ -203,14 +221,57 @@ module Perseids
     v.gsub(/\$\{\{(.*?)\}\}/m) { Expr.str(Expr.new(ctx, failed).eval(Regexp.last_match(1))) }
   end
 
-  # An `if:` with no status function means success() && (it), as on GitHub.
-  def cond(src, ctx, failed)
-    return !failed if src.nil?
-    return src && !failed if src == true || src == false
+  STATUS = /\b(always|success|failure|cancelled)\s*\(/i.freeze
+
+  # An `if:` with no status function means success() && (it), as on GitHub. Boxes get no secrets and perseids has no
+  # vars, so an `if:` whose value depends on either can't be decided here: it's unsupported, never a quiet skip.
+  def cond(src, ctx, failed, success = !failed)
+    return success if src.nil?
+    return src && success if src == true || src == false
     s = src.to_s.strip
     s = s[3..-3] if s.start_with?("${{") && s.end_with?("}}")
-    v = Expr.truthy(Expr.new(ctx, failed).eval(s))
-    s =~ /\b(always|success|failure|cancelled)\s*\(/i ? v : v && !failed
+    e = Expr.new(ctx, failed, success)
+    v = Expr.truthy(e.eval(s))
+    unknown = e.reads & %w[secrets vars]
+    raise Unsupported, "its if: reads #{unknown.join(" and ")}, which perseids doesn't have" unless unknown.empty?
+    s =~ STATUS ? v : v && success
+  end
+
+  # Whether one entry of a job runs, once the jobs it needs have finished: ["run" | "skip" | "unsupported", why].
+  # needs is the needs context: {"job" => {"result" => "success|failure|skipped", "outputs" => {...}}}.
+  def decide(job, ctx, needs = {})
+    ok = needs.values.all? { |n| n["result"] == "success" }
+    failed = needs.values.any? { |n| n["result"] == "failure" }
+    ctx = ctx.merge("needs" => needs)
+    unless cond(job["if"], ctx, failed, ok)
+      return ["skip", "its if: is false"] if ok || job["if"].to_s =~ STATUS
+      return ["skip", "needs #{needs.reject { |_, n| n["result"] == "success" }.keys.join(" ")}"]
+    end
+    runs_on = Array(job["runs-on"].is_a?(Hash) ? job["runs-on"]["labels"] : job["runs-on"]).map { |l| Expr.str(interpolate(l, ctx)) }
+    return ["unsupported", "it calls a reusable workflow"] if job["uses"]
+    return ["unsupported", "it runs in a container"] if job["container"]
+    os = runs_on.find { |l| l =~ /macos|windows/i }
+    os ? ["unsupported", "it runs on #{os}"] : ["run", ""]
+  rescue Unsupported => e
+    ["unsupported", e.message]
+  rescue StandardError => e # fromJSON('') and the like: it can't be decided, which is never a pass
+    ["unsupported", "its if: failed: #{e.message}"]
+  end
+
+  # The needs context, from the CLI's work folder: <job>-<i>/state starts with that entry's result
+  # (pass|fail|incomplete|error|skip|unsupported) and <job>-<i>/outputs holds its job outputs as JSON.
+  # As on GitHub, a matrix job failed if any entry did, and was skipped if none ran.
+  def needs_ctx(job, work)
+    Array(job["needs"]).map do |n|
+      dirs = Dir.children(work).select { |d| d =~ /\A#{Regexp.escape(n)}-\d+\z/ }.sort_by { |d| d[/\d+\z/].to_i }
+      states = dirs.map { |d| (File.read(File.join(work, d, "state")).split.first rescue "").to_s }
+      result = if states.any? { |s| %w[fail error].include?(s) } then "failure"
+               elsif states.any? { |s| %w[pass incomplete].include?(s) } then "success"
+               else "skipped"
+               end
+      outputs = dirs.map { |d| (JSON.parse(File.read(File.join(work, d, "outputs"))) rescue {}) }.reduce({}, :merge)
+      [n, { "result" => result, "outputs" => outputs }]
+    end.to_h
   end
 
   def load(path)
@@ -256,14 +317,17 @@ module Perseids
   end
 
   def base_ctx(wf, job_id = "")
+    needs = (JSON.parse(ENV["PERSEIDS_NEEDS"].to_s) rescue {}) # on a box, from the CLI's decide
     ctx = { "github" => github_ctx(job_id), "env" => {}, "matrix" => {}, "secrets" => {}, "vars" => {}, "inputs" => {},
-            "needs" => {}, "steps" => {}, "job" => { "services" => {} }, "strategy" => {},
+            "needs" => needs, "steps" => {}, "job" => { "services" => {} }, "strategy" => {},
             "runner" => { "os" => "Linux", "arch" => "X64", "name" => "perseids", "temp" => Dir.tmpdir } }
     (wf["env"] || {}).each { |k, v| ctx["env"][k] = Expr.str(interpolate(v, ctx)) }
     ctx
   end
 
-  # Waves follow `needs:`; a job's entries all run at once. Asked-for jobs run in one wave, needs ignored.
+  # Waves follow `needs:`, and asked-for jobs bring the jobs they need. A job with no needs is decided now; one with
+  # needs is a "gate": the CLI decides it (`decide`) when they finish, with their real results and outputs, since an
+  # `if:` read before then sees an empty needs context.
   def plan(wf, only)
     jobs = wf["jobs"] || {}
     (only - jobs.keys).each { |j| raise Unsupported, "no job #{j} (jobs: #{jobs.keys.join(", ")})" }
@@ -273,13 +337,12 @@ module Perseids
       raise Unsupported, "a job needs #{id}, which isn't in the workflow" unless jobs[id]
       wave[id] ||= Array(jobs[id]["needs"]).map { |n| depth.call(n, seen + [id]) + 1 }.max || 0
     end
-    ids = only.empty? ? jobs.keys : only
-    ids.each { |id| only.empty? ? depth.call(id, []) : wave[id] = 0 }
+    (only.empty? ? jobs.keys : only).each { |id| depth.call(id, []) } # wave ends up keyed by every job that runs
     ctx = base_ctx(wf)
     rows = []
-    ids.sort_by { |id| [wave[id], jobs.keys.index(id)] }.each do |id|
+    wave.keys.sort_by { |id| [wave[id], jobs.keys.index(id)] }.each do |id|
       job = jobs[id]
-      needs = only.empty? ? Array(job["needs"]).join(",") : ""
+      needs = Array(job["needs"]).join(",")
       combos = begin
         matrix(job)
       rescue Unsupported => e
@@ -288,18 +351,7 @@ module Perseids
       end
       combos.each_with_index do |combo, i|
         label = combo.empty? ? id : "#{id} (#{combo.values.map { |v| Expr.str(v) }.join(", ")})"
-        jctx = ctx.merge("matrix" => combo)
-        state, note = "run", ""
-        begin
-          runs_on = Array(job["runs-on"].is_a?(Hash) ? job["runs-on"]["labels"] : job["runs-on"]).map { |l| Expr.str(interpolate(l, jctx)) }
-          if !cond(job["if"], jctx, false) then state, note = "skip", "its if: is false"
-          elsif job["uses"] then state, note = "unsupported", "it calls a reusable workflow"
-          elsif job["container"] then state, note = "unsupported", "it runs in a container"
-          elsif (os = runs_on.find { |l| l =~ /macos|windows/i }) then state, note = "unsupported", "it runs on #{os}"
-          end
-        rescue Unsupported => e
-          state, note = "unsupported", e.message
-        end
+        state, note = needs.empty? ? decide(job, ctx.merge("matrix" => combo)) : ["gate", ""]
         rows << [wave[id], id, i, state, needs, label, note]
       end
     end
@@ -567,6 +619,8 @@ module Perseids
       state = failed ? "fail" : skipped > 0 ? "incomplete" : "pass"
       log({ "fail" => "FAILED", "incomplete" => "INCOMPLETE: #{skipped} step(s) skipped, run them another way before calling this green",
             "pass" => "PASSED" }[state])
+      outputs = (@job["outputs"] || {}).map { |k, v| [k, (Expr.str(Perseids.interpolate(v, @ctx)) rescue "")] }.to_h
+      log "PERSEIDS_OUTPUTS #{outputs.to_json}"
       log "PERSEIDS_RESULT #{state}\t#{failed ? failed[0] : ""}"
       { "fail" => 1, "incomplete" => 2, "pass" => 0 }[state]
     end
@@ -575,11 +629,19 @@ end
 
 if $PROGRAM_NAME == __FILE__
   mode, wf_path, *rest = ARGV
-  abort "usage: runner.rb plan <workflow> [job...] | run <workflow> <job> [index]" unless %w[plan run].include?(mode) && wf_path
+  usage = "usage: runner.rb plan <workflow> [job...] | decide <workflow> <job> <index> <work> | run <workflow> <job> [index]"
+  abort usage unless %w[plan decide run].include?(mode) && wf_path
   begin
     wf = Perseids.load(wf_path)
     if mode == "plan"
       Perseids.plan(wf, rest).each { |r| puts r.map { |c| c.to_s.empty? ? "-" : c.to_s.tr("\t\n", "  ") }.join("\t") }
+    elsif mode == "decide" # also leaves <work>/<job>-<index>/needs.json, the needs context the box gets
+      id, index, work = rest[0], rest[1].to_i, rest[2]
+      job = wf["jobs"].fetch(id)
+      needs = Perseids.needs_ctx(job, work)
+      File.write(File.join(work, "#{id}-#{index}", "needs.json"), needs.to_json)
+      state, note = Perseids.decide(job, Perseids.base_ctx(wf, id).merge("matrix" => Perseids.matrix(job)[index] || {}), needs)
+      puts [state, note.tr("\t\n", "  ")].reject(&:empty?).join(" ")
     else
       exit Perseids::Job.new(wf, rest[0], rest[1].to_i).run
     end

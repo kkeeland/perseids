@@ -13,6 +13,7 @@ jobs:
       - run: ruby test/bisect_test.rb
       - run: bash -n bin/perseids
       - run: sh test/install_test.sh
+      - run: bash test/cli_test.sh
 
   services:
     runs-on: ubuntu-latest

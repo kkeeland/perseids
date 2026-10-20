@@ -64,7 +64,7 @@ It asks once, checks the key with Boat, and saves it to `~/.config/perseids/boat
 ```bash
 cd your-repo
 perseids run                 # every job in .github/workflows/ci.yml
-perseids run unit e2e        # only these jobs
+perseids run unit e2e        # only these jobs, and the jobs they need
 perseids run --dirty         # include uncommitted changes
 perseids exec 'npm test'     # one command on one machine
 ```
@@ -177,13 +177,14 @@ killed.
 
 ## What it runs
 
-`services:` (with health checks), `strategy.matrix` (`include` and `exclude`), `needs:`, `if:` and `${{ }}`
+`services:` (with health checks), `strategy.matrix` (`include` and `exclude`), `needs:` (with job `outputs:`), `if:` and `${{ }}`
 expressions, `env`, `working-directory`, `GITHUB_ENV`, `GITHUB_PATH`, `GITHUB_OUTPUT`, `continue-on-error`,
 `timeout-minutes`, and the `setup-node`, `setup-go`, `setup-python`, `setup-java`, `setup-ruby`, `pnpm`, `bun`, `deno`,
 `uv` and `rust` actions.
 
 It doesn't run macOS or Windows jobs, `container:` jobs, reusable workflows, or other marketplace actions. Those are
-reported as skipped and the run exits `2`. Secrets are never sent to machines.
+reported as skipped and the run exits `2`. Secrets are never sent to machines, so an `if:` that depends on `secrets`
+or `vars` can't be decided there: that job or step is reported incomplete too, never skipped as green.
 
 ## Custom machines
 
@@ -195,6 +196,7 @@ Need a database server, browsers or a pinned toolchain? Put the setup in `.perse
 ```bash
 ruby test/runner_test.rb     # the runner, on your machine
 sh test/install_test.sh      # install.sh, in a throwaway HOME
+bash test/cli_test.sh        # bin/perseids end to end, against a fake Boat
 ruby test/bisect_test.rb     # bisect's logic, on your machine
 perseids run                 # this repo's own CI, on machines
 ```

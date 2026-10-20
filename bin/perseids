@@ -4,7 +4,7 @@
 # sends its log back, and is deleted on every way out. No GitHub Actions minutes and no push.
 #
 #   perseids key                                                           # save your Boat API key (asked once, never shown)
-#   perseids run [job...] [-w workflow] [-C dir] [--keep-going] [--dirty]   # no job: every job, in needs: order
+#   perseids run [job...] [-w workflow] [-C dir] [--keep-going] [--dirty]   # every job (or these and what they need), in needs: order
 #   perseids exec '<command>' [-C dir] [--dirty]                           # any command, on one box
 #   perseids exec --split N [--files '<glob>'] '<command>'                 # one command over N boxes: {i} {n} {files}
 #   perseids bisect '<command>' [--good ref] [--bad ref] [-n max] [-C dir] # every commit at once, one box each: the first bad one
@@ -25,7 +25,7 @@
 #   PERSEIDS_TAIL   log lines to print for each failed job (default 40)
 #   PERSEIDS_EVENT  the github.event_name jobs see (default push; workflow_dispatch runs manual-only steps)
 set -euo pipefail
-VERSION=1.0.0
+VERSION=1.1.0
 src=$0
 while [ -L "$src" ]; do d=$(cd "$(dirname "$src")" && pwd); src=$(readlink "$src"); case $src in /*) ;; *) src=$d/$src ;; esac; done
 ROOT=$(cd "$(dirname "$src")/.." && pwd)
@@ -314,6 +314,7 @@ git checkout -q --detach $r && export PERSEIDS_SHA=$r
 bash -lc $(q "${ARGS[0]}")"
   else
     script="$PREP
+export PERSEIDS_NEEDS=$(q "$(cat "$D/needs.json" 2>/dev/null || echo '{}')")
 command -v ruby >/dev/null || { sudo -n apt-get update -qq && sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ruby; } >/dev/null
 ruby ~/runner.rb run $(q "$WF") $(q "$2") $3"
   fi
@@ -325,6 +326,7 @@ ruby ~/runner.rb run $(q "$WF") $(q "$2") $3"
   destroy "$BOX"
   BOX=
   rm -f "$D/box"
+  grep -a '^PERSEIDS_OUTPUTS ' "$log" | tail -1 | cut -d' ' -f2- >"$D/outputs" || true # read by the jobs that need it
   r=$(grep -a '^PERSEIDS_RESULT ' "$log" | tail -1 | cut -d' ' -f2- || true)
   if [ -z "$r" ]; then
     case $rc in 0) r=pass ;; 255) r="error the SSH link dropped (rerun)" ;; *) [ "$CMD" != run ] && r="fail exit $rc" || r="error the box run stopped (exit $rc)" ;; esac
@@ -374,13 +376,14 @@ for w in $WAVES; do
     [ "$wave" = "$w" ] || continue
     id="$job-$idx"
     mkdir -p "$WORK/$id"
-    if [ "$st" != run ]; then setstate "$id" "$st $note"; continue; fi
-    blocked=
-    [ "$needs" = - ] && needs=
-    for n in $(printf %s "$needs" | tr ',' ' '); do
-      for f in "$WORK/$n-"[0-9]*/state; do grep -qE '^(pass|incomplete)' "$f" || blocked="$blocked $n"; done
-    done
-    if [ -n "$blocked" ]; then setstate "$id" "skip needs$blocked"; continue; fi
+    [ "$note" = - ] && note=
+    if [ "$st" = gate ]; then # its needs have finished: decide it with their real results and outputs
+      d=$(ruby "$ROOT/lib/runner.rb" decide "$WF" "$job" "$idx" "$WORK" 2>>"$WORK/$id/err") || d="unsupported couldn't decide whether it runs"
+      st=${d%% *}
+      note=${d#"$st"}
+      note=${note# }
+    fi
+    if [ "$st" != run ]; then setstate "$id" "$st${note:+ $note}"; continue; fi
     setstate "$id" queued
     while [ "$(jobs -rp | wc -l | tr -d ' ')" -ge "$MAX" ]; do board; sleep 2; done
     (worker "$id" "$job" "$idx" "$label") </dev/null 2>>"$WORK/$id/err" & # stdin isn't the plan: ssh would eat it

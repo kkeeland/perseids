@@ -85,14 +85,28 @@ wait_state() { # id state...
   done
   die "box $id stayed $s"
 }
-create() { # json boxfile name -> sets BOX and writes its id to boxfile (cleanup deletes what's there). Boat limits starts per minute, so a refused start waits and retries.
-  local r
-  for i in $(seq 12); do
+create() { # json boxfile name -> sets BOX and writes its id to boxfile (cleanup deletes what's there).
+  # Boat limits starts per minute and per hour (rate_limited, not counted as a start): a refused start waits for a
+  # slot, up to PERSEIDS_RATE_WAIT seconds (default 1800). A daily limit or any other refusal fails the box.
+  local r code win i=0 waited=0 limit=${PERSEIDS_RATE_WAIT:-1800}
+  while :; do
+    i=$((i + 1))
     r=$(api POST /sandboxes "$1" "Idempotency-Key: perseids-$$-$RANDOM")
     BOX=$(jq -r '.sandbox.id // empty' <<<"$r" 2>/dev/null)
     [ -n "$BOX" ] && break
+    code=$(jq -r '.code // empty' <<<"$r" 2>/dev/null)
+    win=$(jq -r '.window // .details.window // ((.message // "") | if test("per hour") then "hour" elif test("per day") then "day" else "" end)' <<<"$r" 2>/dev/null)
+    if { [ "$code" = rate_limited ] || [ -n "$win" ]; } && [ "$win" != day ] && [ "$waited" -lt "$limit" ]; then
+      if [ "$win" = hour ]; then
+        [ "$waited" = 0 ] && say "Boat's start limit for this hour is reached; waiting up to $((limit / 60)) min for a slot"
+        sleep 60; waited=$((waited + 60))
+      else
+        sleep 10; waited=$((waited + 10))
+      fi
+      continue
+    fi
     [ "$(jq -r .retry <<<"$r" 2>/dev/null)" = false ] && die "$(jq -r '.message // .code' <<<"$r")"
-    [ "$i" = 12 ] && die "Boat refused the box: $(jq -r '.message // .error // .code // .' <<<"$r" 2>/dev/null | head -c 300)"
+    [ "$i" -ge 12 ] && die "Boat refused the box: $(jq -r '.message // .error // .code // .' <<<"$r" 2>/dev/null | head -c 300)"
     sleep 10
   done
   echo "$BOX" >"$2"
@@ -317,7 +331,7 @@ slug() { printf %s "$1" | tr -c 'A-Za-z0-9._-' '-' | cut -c1-40; }
 worker() { # id job index label
   local id=$1 D="$WORK/$1" log="$LOGDIR/$1.log" rc r script
   BOX=
-  trap '[ -n "$BOX" ] && destroy "$BOX"; rm -f "$D/box"; grep -qE "^(pass|fail|incomplete)" "$D/state" || setstate "$id" "error $(tail -1 "$D/err" 2>/dev/null)"' EXIT
+  trap '[ -n "$BOX" ] && destroy "$BOX"; rm -f "$D/box"; grep -qE "^(pass|fail|incomplete|error)" "$D/state" || setstate "$id" "error $(tail -1 "$D/err" 2>/dev/null)"' EXIT
   # Wait for a slot under PERSEIDS_MAX across every perseids run on this account.
   # ponytail: check-then-create, so runs that start together can overshoot by a few; fine for a cost cap.
   while [ "$(boxes | wc -l | tr -d ' ')" -ge "$MAX" ]; do sleep 15; done

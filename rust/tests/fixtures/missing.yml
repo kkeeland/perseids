@@ -1,2 +1,0 @@
-jobs:
-  a: { needs: ghost, runs-on: ubuntu-latest }

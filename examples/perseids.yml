@@ -1,0 +1,15 @@
+# Runs your CI workflow (ci.yml) on Perseids: every job at once, each on its own cloud machine.
+# Add your Boat API key as a repository secret named BOAT_API_KEY.
+name: perseids
+on: [push, pull_request]
+jobs:
+  perseids:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: kkeeland/perseids@v1
+        with:
+          boat-api-key: ${{ secrets.BOAT_API_KEY }}
+          workflow: ci.yml

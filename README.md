@@ -127,6 +127,30 @@ codex plugin add perseids@perseids
 Before saying work is done, commit and run `perseids run`. Report the SHA and the exit code.
 ```
 
+## Run it from GitHub Actions
+
+Add your Boat key as a repository secret named `BOAT_API_KEY`, then add this workflow. One small runner orchestrates,
+and every job of `ci.yml` runs on its own cloud machine. The result shows up as a job summary.
+
+```yaml
+# .github/workflows/perseids.yml
+name: perseids
+on: [push, pull_request]
+jobs:
+  perseids:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: kkeeland/perseids@v1
+        with:
+          boat-api-key: ${{ secrets.BOAT_API_KEY }}
+          workflow: ci.yml
+```
+
+Inputs: `workflow`, `jobs`, `machine` (`large` or `xlarge`), `max` and `keep-going`.
+
 ## Exit codes
 
 | Code | Meaning |

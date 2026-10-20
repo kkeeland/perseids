@@ -1,0 +1,47 @@
+name: Perseids CI
+description: Run every job in your workflow at once, each on a fresh 8 or 16 vCPU cloud machine, from one small runner.
+author: kkeeland
+branding:
+  icon: zap
+  color: gray-dark
+inputs:
+  boat-api-key:
+    description: Your Boat API key. Pass it from a secret, for example secrets.BOAT_API_KEY.
+    required: true
+  workflow:
+    description: The workflow file to run, for example ci.yml. Default ci.yml, or the only workflow there is.
+    required: false
+    default: ""
+  jobs:
+    description: Only these jobs, space-separated. Default every job.
+    required: false
+    default: ""
+  machine:
+    description: large (8 vCPU, 16 GB) or xlarge (16 vCPU).
+    required: false
+    default: large
+  max:
+    description: Machines at once.
+    required: false
+    default: "10"
+  keep-going:
+    description: Run past a failing step to see every failure in one run.
+    required: false
+    default: "false"
+outputs:
+  exit-code:
+    description: 0 passed, 1 a job failed, 2 incomplete, 99 a machine failed.
+    value: ${{ steps.run.outputs.exit-code }}
+runs:
+  using: composite
+  steps:
+    - id: run
+      shell: bash
+      env:
+        BOAT_API_KEY: ${{ inputs.boat-api-key }}
+        INPUT_WORKFLOW: ${{ inputs.workflow }}
+        INPUT_JOBS: ${{ inputs.jobs }}
+        PERSEIDS_TYPE: ${{ inputs.machine }}
+        PERSEIDS_MAX: ${{ inputs.max }}
+        INPUT_KEEP_GOING: ${{ inputs.keep-going }}
+      run: bash "$GITHUB_ACTION_PATH/action/run.sh"

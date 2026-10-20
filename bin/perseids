@@ -189,6 +189,8 @@ case $CMD in
   help | -h | --help) usage ;;
   login) # GitHub device flow through the hosted server; it keeps only your GitHub id and login
     command -v jq >/dev/null || die "perseids needs jq"
+    [ -n "${PERSEIDS_CLOUD_URL:-}" ] || grep -q '^PERSEIDS_CLOUD_URL=' "$CLOUD_FILE" 2>/dev/null ||
+      die "Perseids Cloud is in early access and has no public server yet. Use your own Boat key instead: perseids key"
     r=$(curl -sS -X POST "$CLOUD_URL/auth/device")
     [ -n "$(jq -r '.device_code // empty' <<<"$r")" ] || die "sign-in didn't start: $(jq -r '.message // .error // .' <<<"$r")"
     say "open $(jq -r .verification_uri <<<"$r") and enter $(jq -r .user_code <<<"$r")"

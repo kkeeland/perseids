@@ -7,12 +7,15 @@
 #   perseids run [job...] [-w workflow] [-C dir] [--keep-going] [--dirty]   # no job: every job, in needs: order
 #   perseids exec '<command>' [-C dir] [--dirty]                           # any command, on one box
 #   perseids exec --split N [--files '<glob>'] '<command>'                 # one command over N boxes: {i} {n} {files}
+#   perseids bisect '<command>' [--good ref] [--bad ref] [-n max] [-C dir] # every commit at once, one box each: the first bad one
 #   perseids image build [-C dir]                                          # bake .perseids/setup.sh into an image
 #   perseids ls                                                            # this account's perseids boxes
 #   perseids reap [--all]                                                  # delete orphaned (or all) boxes from here
 #   perseids login | usage                                                 # hosted mode: sign in with GitHub | this month's use
 #
 # Exit: 0 passed, 1 failed, 2 incomplete (something it can't run on a box was skipped), 99 a box itself failed.
+#   bisect: 0 named the first bad commit, 1 none found or the results don't line up, 99 a box failed.
+#   Its defaults: --bad HEAD, --good the merge-base with origin's default branch (else n-1 commits back), -n 30.
 # Settings (environment):
 #   BOAT_API_KEY, or PERSEIDS_KEY_FILE (default ~/.config/perseids/boat.env, written by `perseids key`).
 #     The key goes to curl on stdin and is never printed or sent to a box.
@@ -145,6 +148,9 @@ DIRTY=
 ALL=
 SPLIT=
 FILES=
+GOOD=
+BAD=HEAD
+NMAX=30
 ARGS=()
 while [ $# -gt 0 ]; do
   case $1 in
@@ -155,6 +161,9 @@ while [ $# -gt 0 ]; do
     --all) ALL=all; shift ;;
     --split) SPLIT=${2:?--split needs a number of boxes}; shift 2 ;;
     --files) FILES=${2:?--files needs a glob}; shift 2 ;;
+    --good) GOOD=${2:?--good needs a ref}; shift 2 ;;
+    --bad) BAD=${2:?--bad needs a ref}; shift 2 ;;
+    -n) NMAX=${2:?-n needs a number}; shift 2 ;;
     -h | --help) usage ;;
     -*) say "unknown flag $1"; usage 64 ;;
     *) ARGS+=("$1"); shift ;;
@@ -197,7 +206,7 @@ case $CMD in
     exit 0 ;;
   ls) key; boxes; exit 0 ;;
   reap) key; reap "$ALL"; exit 0 ;;
-  run | exec | image) key; command -v jq >/dev/null || die "perseids needs jq" ;;
+  run | exec | image | bisect) key; command -v jq >/dev/null || die "perseids needs jq" ;;
   *) say "unknown command $CMD"; usage 64 ;;
 esac
 if [ -n "$CLOUD" ]; then
@@ -248,9 +257,15 @@ fi
 git -C "$DIR" rev-parse --git-dir >/dev/null 2>&1 || die "$DIR isn't a git repo"
 cd "$(git -C "$DIR" rev-parse --show-toplevel)"
 DIR=$(pwd)
-SHA=$(git rev-parse HEAD)
+if [ "$CMD" = bisect ]; then # the commits to test, one per box: "sha<TAB>subject", oldest first; the bundle holds the newest
+  [ -n "${ARGS[0]:-}" ] || die "bisect needs a command"
+  command -v ruby >/dev/null || die "perseids needs ruby (2.6 or newer) for bisect"
+  ruby "$ROOT/lib/bisect.rb" range "$GOOD" "$BAD" "$NMAX" >"$WORK/bisect" || exit 64
+  SHA=$(tail -1 "$WORK/bisect" | cut -f1)
+fi
+SHA=${SHA:-$(git rev-parse HEAD)}
 TAG=${SHA:0:8}
-if ! git diff --quiet HEAD --; then
+if [ "$CMD" != bisect ] && ! git diff --quiet HEAD --; then
   [ -n "$DIRTY" ] || die "uncommitted changes to tracked files: commit them (perseids tests a commit), or pass --dirty"
   SHA=$(git stash create) # a commit of the working tree; it touches nothing here
   TAG=${TAG}+dirty
@@ -278,6 +293,8 @@ if [ "$CMD" = exec ] && [ -n "$SPLIT$FILES" ]; then # one shard per box; the wor
 elif [ "$CMD" = exec ]; then
   [ -n "${ARGS[0]:-}" ] || die "exec needs a command"
   printf '0\texec\t0\trun\t-\texec\t-\n' >"$WORK/plan"
+elif [ "$CMD" = bisect ]; then
+  awk -F'\t' '{ printf "0\tbisect\t%d\trun\t-\t%s %s\t-\n", NR - 1, substr($1, 1, 7), $2 }' "$WORK/bisect" >"$WORK/plan"
 else
   if [ -z "$WF" ]; then
     for f in .github/workflows/ci.yml .github/workflows/ci.yaml; do [ -f "$f" ] && WF=$f && break; done
@@ -313,6 +330,11 @@ worker() { # id job index label
   if [ "$CMD" = exec ]; then
     script="$PREP
 bash -lc $(q "$(cat "$WORK/shard-$3.cmd" 2>/dev/null || printf %s "${ARGS[0]}")")"
+  elif [ "$CMD" = bisect ]; then
+    r=$(sed -n "$(($3 + 1))p" "$WORK/bisect" | cut -f1)
+    script="$PREP
+git checkout -q --detach $r && export PERSEIDS_SHA=$r
+bash -lc $(q "${ARGS[0]}")"
   else
     script="$PREP
 command -v ruby >/dev/null || { sudo -n apt-get update -qq && sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ruby; } >/dev/null
@@ -328,7 +350,7 @@ ruby ~/runner.rb run $(q "$WF") $(q "$2") $3"
   rm -f "$D/box"
   r=$(grep -a '^PERSEIDS_RESULT ' "$log" | tail -1 | cut -d' ' -f2- || true)
   if [ -z "$r" ]; then
-    case $rc in 0) r=pass ;; 255) r="error the SSH link dropped (rerun)" ;; *) [ "$CMD" = exec ] && r="fail exit $rc" || r="error the box run stopped (exit $rc)" ;; esac
+    case $rc in 0) r=pass ;; 255) r="error the SSH link dropped (rerun)" ;; *) [ "$CMD" != run ] && r="fail exit $rc" || r="error the box run stopped (exit $rc)" ;; esac
   else
     r=$(printf %s "$r" | tr '\t' ' ')
   fi
@@ -340,7 +362,7 @@ TTY=
 [ -t 2 ] && TTY=1
 DRAWN=0
 board() {
-  local now id st start end secs cost lines=0 out=""
+  local now id st start end secs cost lines=0 out="" wave job idx st0 needs label note # the plan loop reads these too
   now=$(date +%s)
   while IFS=$'\t' read -r wave job idx st0 needs label note; do
     id="$job-$idx"
@@ -391,6 +413,29 @@ for w in $WAVES; do
   while [ -n "$(jobs -rp)" ]; do board; sleep 2; done
 done
 board
+
+# --- bisect: the timeline and the first bad commit; a sampled range narrows to the gap and runs again ---
+if [ "$CMD" = bisect ]; then
+  total=0
+  while IFS=$'\t' read -r wave job idx st0 needs label note; do
+    start=$(cat "$WORK/$job-$idx/start" 2>/dev/null || echo 0)
+    end=$(cat "$WORK/$job-$idx/end" 2>/dev/null || echo "$start")
+    total=$((total + end - start))
+    printf '%s\t%s\n' "$(sed -n "$((idx + 1))p" "$WORK/bisect")" "$(cat "$WORK/$job-$idx/state")"
+  done <"$WORK/plan" >"$WORK/results"
+  set +e
+  next=$(ruby "$ROOT/lib/bisect.rb" report "$LOGDIR" <"$WORK/results")
+  rc=$?
+  set -e
+  echo "--- $(awk -v s="$total" -v p="$(price)" 'BEGIN{printf "%d box-min, about $%.2f", s/60, s/3600*p}') · logs $LOGDIR" >&2
+  if [ "$rc" = 3 ]; then
+    read -r g b <<<"$next"
+    cleanup
+    trap - EXIT
+    exec "$ROOT/bin/perseids" bisect "${ARGS[0]}" -C "$DIR" --good "$g" --bad "$b" -n "$NMAX"
+  fi
+  exit "$rc"
+fi
 
 # --- summary ---
 rc=0

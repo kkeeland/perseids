@@ -78,6 +78,19 @@ perseids exec --split 8 --files 'test/**/*_test.rb' 'ruby -Itest -e "ARGV.each {
 `pytest --splits {n} --group {i}`). With `--files`, the files in that commit that match the glob are split into groups
 balanced by file size, the same way every time, and `{files}` becomes one machine's group, quoted (it's added at the
 end if the command doesn't have it). The summary shows each shard's time, and the run fails if any shard fails.
+## Find the commit that broke it
+
+`git bisect` tests one commit at a time, about five rounds in a row. `perseids bisect` tests every commit in the range
+at once, one machine each, and names the first bad commit in the time of one run.
+
+```bash
+perseids bisect 'npm test'                  # HEAD against where it left main (or the last 30 commits)
+perseids bisect 'make test' --good v1.4.0   # your own range; --bad defaults to HEAD
+```
+
+It prints each commit with pass or fail, then the first bad one: its SHA, subject and author. If the range is longer
+than `-n` (default 30), it tests an even spread first, then narrows. It tells you when the results don't line up, such
+as a flaky test that passes after a failure.
 
 ## What you get
 
@@ -161,6 +174,7 @@ spend. It's in early access.
 ```bash
 ruby test/runner_test.rb     # the runner, on your machine
 sh test/install_test.sh      # install.sh, in a throwaway HOME
+ruby test/bisect_test.rb     # bisect's logic, on your machine
 perseids run                 # this repo's own CI, on machines
 ```
 
